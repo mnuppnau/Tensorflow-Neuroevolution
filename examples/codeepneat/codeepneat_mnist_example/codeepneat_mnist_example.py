@@ -1,6 +1,16 @@
 from absl import app, flags, logging
 
+import sys
+sys.path.append('/tmp/')
+
+print("sys path : ",sys.path)
+import tensorflow as tf
+
 import tfne
+
+gpus = tf.config.experimental.list_physical_devices('GPU')
+for gpu in gpus:
+    tf.config.experimental.set_memory_growth(gpu, True)
 
 flags.DEFINE_integer('logging_level',
                      default=None, help='Integer parameter specifying the verbosity of the absl logging library')
@@ -25,10 +35,10 @@ def codeepneat_mnist_example(_):
     """
     # Set standard configuration specific to TFNE but not the neuroevolution process
     logging_level = logging.INFO
-    config_file_path = './codeepneat_mnist_example_config.cfg'
-    backup_dir_path = './tfne_state_backups/'
+    config_file_path = '/tmp/examples/codeepneat/codeepneat_mnist_example/codeepneat_mnist_example_config.cfg'
+    backup_dir_path = '/tmp/examples/codeepneat/codeepneat_mnist_example/tfne_state_backups/'
     max_generations = 72
-    max_fitness = None
+    max_fitness = 100
 
     # Read in optionally supplied flags, changing the just set standard configuration
     if flags.FLAGS.logging_level is not None:

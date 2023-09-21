@@ -19,6 +19,7 @@ class MNISTEnvironment(BaseEnvironment):
         parameters. The configuration of the environment can either be supplied via a config file or via seperate config
         parameters in the initialization.
         @param weight_training: bool flag, indicating wether evaluation should be weight training or not
+
         @param config: ConfigParser instance holding an 'Environment' section specifying the required environment
                        parameters for the chosen evaluation method.
         @param verbosity: integer specifying the verbosity of the evaluation
@@ -70,6 +71,7 @@ class MNISTEnvironment(BaseEnvironment):
         """
         # Get model and optimizer required for compilation
         model = genome.get_model()
+        model.summary()
         optimizer = genome.get_optimizer()
 
         # Compile and train model
@@ -83,7 +85,8 @@ class MNISTEnvironment(BaseEnvironment):
         # Determine fitness by creating model predictions with test images and then judging the fitness based on the
         # achieved model accuracy. Return this fitness
         self.accuracy_metric.reset_states()
-        self.accuracy_metric.update_state(self.test_labels, np.argmax(model(self.test_images), axis=-1))
+        predictions = model.predict(self.test_images, batch_size = self.batch_size)
+        self.accuracy_metric.update_state(self.test_labels, np.argmax(predictions, axis=-1))
         return round(self.accuracy_metric.result().numpy() * 100, 4)
 
     def _eval_genome_fitness_non_weight_training(self, genome) -> float:
@@ -102,7 +105,8 @@ class MNISTEnvironment(BaseEnvironment):
         # achieved model accuracy.
         model = genome.get_model()
         self.accuracy_metric.reset_states()
-        self.accuracy_metric.update_state(self.test_labels, np.argmax(model(self.test_images), axis=-1))
+        predictions = model.predict(self.test_images, batch_size = self.batch_size)
+        self.accuracy_metric.update_state(self.test_labels, np.argmax(predictions, axis=-1))
         evaluated_fitness = round(self.accuracy_metric.result().numpy() * 100, 4)
         print("Achieved Fitness:\t{}\n".format(evaluated_fitness))
 
