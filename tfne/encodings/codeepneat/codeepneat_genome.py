@@ -23,6 +23,7 @@ class CoDeepNEATGenome(BaseGenome,
                  genome_id,
                  blueprint,
                  bp_assigned_modules,
+                 input_layers,
                  output_layers,
                  input_shape,
                  dtype,
@@ -47,6 +48,7 @@ class CoDeepNEATGenome(BaseGenome,
         # Register genotype
         self.blueprint = blueprint
         self.bp_assigned_modules = bp_assigned_modules
+        self.input_layers = input_layers
         self.output_layers = output_layers
 
         # Initialize internal variables
@@ -132,6 +134,7 @@ class CoDeepNEATGenome(BaseGenome,
             'fitness': self.fitness,
             'blueprint': self.blueprint.serialize(),
             'bp_assigned_modules': serialized_bp_assigned_mods,
+            'input_layers': self.input_layers,
             'output_layers': self.output_layers,
             'input_shape': self.input_shape,
             'dtype': self.dtype,
@@ -172,9 +175,9 @@ class CoDeepNEATGenome(BaseGenome,
     def set_fitness(self, fitness):
         self.fitness = fitness
 
-    def get_genotype(self) -> (CoDeepNEATBlueprint, {int: CoDeepNEATModuleBase}, [dict]):
+    def get_genotype(self) -> (CoDeepNEATBlueprint, {int: CoDeepNEATModuleBase}, [dict], [dict]):
         """"""
-        return self.blueprint, self.bp_assigned_modules, self.output_layers
+        return self.blueprint, self.bp_assigned_modules, self.output_layers, self.input_layers
 
     def get_model(self) -> tf.keras.Model:
         """"""

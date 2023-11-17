@@ -19,7 +19,22 @@ class CoDeepNEATModel:
         # saving the output of each layer in a dict that associates it with the node and serves for a later reference
         # in the functional style of model creation.
         inputs = tf.keras.Input(shape=self.input_shape, dtype=self.dtype)
-        node_outputs = {1: inputs}
+             
+        # Deserialize and add static beginning layers
+        x = inputs
+        #for layer_config in self.input_layers:
+        #    deserialized_layer = tf.keras.layers.deserialize(layer_config)
+        
+        deserialized_input_layers = [tf.keras.layers.deserialize(layer_config) for layer_config in self.input_layers]
+    
+        for in_layer in deserialized_input_layers:
+            x = in_layer(x)
+
+        #x = deserialized_layer(x)
+
+        # Update the node_outputs dictionary with the modified x
+        node_outputs = {1: x}
+        #node_outputs = {1: inputs}
 
         # Create the TF model iteratively through the keras functional API by creating the single layers in the order in
         # which they are called, which is made possible through the topological sorting of the graph. Traverse this

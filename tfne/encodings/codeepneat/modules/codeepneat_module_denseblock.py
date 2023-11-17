@@ -156,6 +156,34 @@ class CoDeepNEATModuleDenseBlock(CoDeepNEATModuleBase):
         
             return x
 
+        def simam_attention(input_tensor, e_lambda=1e-4):
+            """
+            SimAM attention mechanism (TensorFlow), made similar to the PyTorch version.
+            Args:
+            - input_tensor: The input tensor (feature map) on which attention needs to be applied.
+            - e_lambda: A small value for stability.
+
+            Returns:
+            - Output tensor after applying SimAM attention.
+            """
+            # Calculate the channel-wise mean
+            mean = tf.reduce_mean(input_tensor, axis=[1, 2], keepdims=True)
+    
+            # Calculate the squared difference
+            x_minus_mu_square = tf.square(input_tensor - mean)
+    
+            # Calculate n (for normalization)
+            _, _, h, w = input_tensor.shape
+            n = w * h - 1
+
+            # Calculate the y value for scaling
+            y = x_minus_mu_square / (4 * (tf.reduce_sum(x_minus_mu_square, axis=[1, 2], keepdims=True) / n + e_lambda)) + 0.5
+
+            # Apply sigmoid activation to y
+            y = tf.sigmoid(y)
+    
+            return input_tensor * y
+
         # Initialize empty list of layers
         module_layers = list()
 
@@ -183,8 +211,13 @@ class CoDeepNEATModuleDenseBlock(CoDeepNEATModuleBase):
             dropout_flag=self.dropout_flag
         )
 
-        module_layers.append(transition_module)
+        # SimAM Module
+        simam_module = lambda input_tensor: simam_attention(input_tensor)
+
+        #module_layers.append(transition_module)
         module_layers.append(dense_module)
+        module_layers.append(simam_module)
+        module_layers.append(transition_module)
 
         return module_layers
 

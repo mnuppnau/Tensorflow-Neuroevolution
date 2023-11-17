@@ -102,15 +102,19 @@ def load_chexpert_data(root_dir='./data', batch_size=32, resize=None):
     dataset = ChexpertSmallTF(root=root_dir)
     train_df = pd.read_csv(os.path.join(root_dir, dataset.dir_name, 'processed_train.csv'))
     valid_df = pd.read_csv(os.path.join(root_dir, dataset.dir_name, 'processed_valid.csv'))
-
+    
+    # Modify dataframes
+    train_df.replace(-1, 1, inplace=True)
+    valid_df.replace(-1, 1, inplace=True)
+    
     # Extract paths and labels
     #train_image_paths = train_df['Path'].values
     train_image_paths = [os.path.join('./data', p) for p in train_df['Path'].values]
     
-    train_labels = train_df[dataset.attr_names].values.astype('float32')
+    train_labels = train_df[dataset.attr_names].values.astype('int')
     
     #test_image_paths = valid_df['Path'].values
-    test_labels = valid_df[dataset.attr_names].values.astype('float32')
+    test_labels = valid_df[dataset.attr_names].values.astype('int')
     test_image_paths = [os.path.join('./data', p) for p in valid_df['Path'].values]
 
 
@@ -136,15 +140,15 @@ def load_chexpert_data(root_dir='./data', batch_size=32, resize=None):
     test_dataset = test_dataset.batch(batch_size)
 
     # Pull a single batch from the training dataset
-    for image_batch, label_batch in train_dataset.take(1):
-        print("Image batch shape: ", image_batch.shape)
-        print("Label batch shape: ", label_batch.shape)
+    #for image_batch, label_batch in train_dataset.take(1):
+    #    print("Image batch shape: ", image_batch.shape)
+    #    print("Label batch shape: ", label_batch.shape)
     
-        # Print the first few values of the first image in the batch
-        print("First few pixel values of the first image in batch: ", image_batch[0].numpy()[0][0])
+    #    # Print the first few values of the first image in the batch
+    #    print("First few pixel values of the first image in batch: ", image_batch[0].numpy()[0][0])
     
-        # Print the first label in the batch
-        print("First label in batch:", label_batch[0].numpy())
+    #    # Print the first label in the batch
+    #    print("First label in batch:", label_batch[0].numpy())
 
     return train_dataset, test_dataset
 

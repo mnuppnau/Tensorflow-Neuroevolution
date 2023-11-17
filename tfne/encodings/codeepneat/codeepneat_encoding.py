@@ -169,6 +169,7 @@ class CoDeepNEATEncoding(BaseEncoding):
     def create_genome(self,
                       blueprint,
                       bp_assigned_modules,
+                      input_layers,
                       output_layers,
                       input_shape,
                       generation) -> (int, CoDeepNEATGenome):
@@ -182,10 +183,11 @@ class CoDeepNEATEncoding(BaseEncoding):
         @return: int of genome ID and newly created CoDeepNEAT genome instance
         """
         self.genome_id_counter += 1
-        # Genome genotype: (blueprint, bp_assigned_modules, output_layers)
+        # Genome genotype: (blueprint, bp_assigned_modules, output_layers, input_layers)
         return self.genome_id_counter, CoDeepNEATGenome(genome_id=self.genome_id_counter,
                                                         blueprint=blueprint,
                                                         bp_assigned_modules=bp_assigned_modules,
+                                                        input_layers=input_layers,
                                                         output_layers=output_layers,
                                                         input_shape=input_shape,
                                                         dtype=self.dtype,

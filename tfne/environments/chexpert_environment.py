@@ -2,6 +2,8 @@ from .base_environment import BaseEnvironment
 from tfne.helper_functions import read_option_from_config
 from tfne.helper_functions import load_chexpert_data
 from tfne.helper_functions import set_tensorflow_memory_growth
+from tqdm.keras import TqdmCallback
+
 import tensorflow as tf
 import numpy as np
 
@@ -13,7 +15,7 @@ class CheXpertEnvironment(BaseEnvironment):
         print("Data loaded")
         
         #self.accuracy_metric = tf.keras.metrics.AUC(multi_label=True)  # Using AUC for multi-label classification             
-        self.accuracy_metric = tf.keras.metrics.AUC(multi_label=True)
+        self.accuracy_metric = tf.keras.metrics.BinaryAccuracy(threshold=0.5)
         self.verbosity = verbosity                                                                                                                                           
 
         if not weight_training:                                                                                                                                                 
@@ -25,7 +27,7 @@ class CheXpertEnvironment(BaseEnvironment):
         elif len(kwargs) == 0:                                                                                                                                                 
             self.eval_genome_fitness = self._eval_genome_fitness_weight_training                                                             
             self.epochs = read_option_from_config(config, 'EVALUATION', 'epochs')                                                            
-            self.batch_size = read_option_from_config(config, 'EVALUATION', 'batch_size')                                                 
+            #self.batch_size = read_option_from_config(config, 'EVALUATION', 'batch_size')                                                 
             
             # Apply batch and prefetch to the dataset
             #self.train_dataset = self.train_dataset.batch(self.batch_size).prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
@@ -34,7 +36,7 @@ class CheXpertEnvironment(BaseEnvironment):
         elif config is None:                                                                                                                                                     
             self.eval_genome_fitness = self._eval_genome_fitness_weight_training                                                             
             self.epochs = kwargs['epochs']                                                                                                                              
-            self.batch_size = kwargs['batch_size'] 
+            #self.batch_size = kwargs['batch_size'] 
         
             # Apply batch and prefetch to the dataset
             #self.train_dataset = self.train_dataset.batch(self.batch_size).prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
@@ -59,16 +61,16 @@ class CheXpertEnvironment(BaseEnvironment):
             model = genome.get_model()                                                                                                                                    
             model.summary()
             optimizer = genome.get_optimizer()                                                                                                                          
-
+            print('model compiling,...........')
             model.compile(optimizer=optimizer,                                                                                                                          
                           loss=tf.keras.losses.BinaryCrossentropy(from_logits=False),                                                                      
                           metrics=[self.accuracy_metric])                                                                                                                   
-            #print('Starting model training,...............')
+            print('Starting model training,...............')
             model.fit(self.train_dataset,
                       epochs=self.epochs,                                                                                                                                        
-                      verbose=self.verbosity)                                                                                                                                    
+                      verbose=2, callbacks=[TqdmCallback(verbose=2)])                                                                                                                                    
 
-            #print('Model training complete,...............')
+            print('Model training complete,...............')
             #predictions = model.predict(self.test_dataset)
 
             # Check for NaNs in predictions

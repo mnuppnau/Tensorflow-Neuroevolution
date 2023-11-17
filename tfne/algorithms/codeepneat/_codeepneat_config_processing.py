@@ -18,7 +18,12 @@ class CoDeepNEATConfigProcessing:
         self.dtype = read_option_from_config(self.config, 'GENOME', 'dtype')
         self.available_modules = read_option_from_config(self.config, 'GENOME', 'available_modules')
         self.available_optimizers = read_option_from_config(self.config, 'GENOME', 'available_optimizers')
+        self.input_layers = read_option_from_config(self.config, 'GENOME', 'input_layers')
         self.output_layers = read_option_from_config(self.config, 'GENOME', 'output_layers')
+
+        # Adjust output_layers config to include the configured datatype
+        for in_layer in self.input_layers:
+            in_layer['config']['dtype'] = self.dtype
 
         # Adjust output_layers config to include the configured datatype
         for out_layer in self.output_layers:

@@ -5,7 +5,7 @@ import tensorflow as tf
 
 from .base_environment import BaseEnvironment
 from tfne.helper_functions import read_option_from_config
-
+from tqdm.keras import TqdmCallback
 
 class MNISTEnvironment(BaseEnvironment):
     """
@@ -80,7 +80,8 @@ class MNISTEnvironment(BaseEnvironment):
                   y=self.train_labels,
                   epochs=self.epochs,
                   batch_size=self.batch_size,
-                  verbose=self.verbosity)
+                  verbose=self.verbosity,
+                  callbacks=[TqdmCallback(verbose=2)])
 
         # Determine fitness by creating model predictions with test images and then judging the fitness based on the
         # achieved model accuracy. Return this fitness

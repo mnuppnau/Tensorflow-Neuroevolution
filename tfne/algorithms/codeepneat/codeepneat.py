@@ -204,6 +204,7 @@ class CoDeepNEAT(BaseNeuroevolutionAlgorithm,
                     # output layers and input shape as well as the current generation
                     genome_id, genome = self.enc.create_genome(blueprint,
                                                                bp_assigned_modules,
+                                                               self.input_layers,
                                                                self.output_layers,
                                                                self.input_shape,
                                                                self.pop.generation_counter)
