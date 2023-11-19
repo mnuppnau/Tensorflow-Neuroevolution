@@ -214,6 +214,7 @@ class CoDeepNEAT(BaseNeuroevolutionAlgorithm,
                     # valid TF model. See warning string.
                     bp_id = blueprint.get_id()
                     mod_spec_to_id = dict()
+                    print('bp assigned mod : ', bp_assigned_modules)
                     for spec, mod in bp_assigned_modules.items():
                         mod_spec_to_id[spec] = mod.get_id()
                     logging.warning(f"CoDeepNEAT tried combining the Blueprint ID {bp_id} with the module assignment "

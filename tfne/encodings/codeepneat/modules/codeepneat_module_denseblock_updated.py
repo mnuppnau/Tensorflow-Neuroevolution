@@ -3,12 +3,16 @@ from __future__ import annotations
 import math
 import random
 import statistics
-import tensorflow.compat.v2 as tf
+
 import numpy as np
 import tensorflow as tf
 
 from .codeepneat_module_base import CoDeepNEATModuleBase
 from tfne.helper_functions import round_with_step
+from tensorflow.keras.layers import Layer
+
+import tensorflow.compat.v2 as tf
+
 from keras import backend
 from keras.applications import imagenet_utils
 from keras.engine import training
@@ -16,7 +20,118 @@ from keras.layers import VersionAwareLayers
 from keras.utils import data_utils
 from keras.utils import layer_utils
 
+# isort: off
+from tensorflow.python.util.tf_export import keras_export
+from tensorflow.keras import Model, Input, layers, backend
 layers = VersionAwareLayers()
+
+
+def dense_block(x, blocks, growth_rate):
+    """A dense block.
+
+    Args:
+      x: input tensor.
+      blocks: integer, the number of building blocks.
+      name: string, block label.
+
+    Returns:
+      Output tensor for the block.
+    """
+    for i in range(blocks):
+        x = conv_block(x,growth_rate)
+    return x
+
+
+def transition_block(x, reduction):
+    """A transition block.
+
+    Args:
+      x: input tensor.
+      reduction: float, compression rate at transition layers.
+      name: string, block label.
+
+    Returns:
+      output tensor for the block.
+    """
+    bn_axis = 3 if backend.image_data_format() == "channels_last" else 1
+    x = layers.BatchNormalization(
+        axis=bn_axis, epsilon=1.001e-5
+    )(x)
+    x = layers.Activation("relu")(x)
+    x = layers.Conv2D(
+        int(backend.int_shape(x)[bn_axis] * reduction),
+        1,
+        use_bias=False,
+    )(x)
+    x = layers.AveragePooling2D(2, strides=2)(x)
+    return x
+
+
+def conv_block(x,growth_rate):
+    """A building block for a dense block.
+
+    Args:
+      x: input tensor.
+      growth_rate: float, growth rate at dense layers.
+      name: string, block label.
+
+    Returns:
+      Output tensor for the block.
+    """
+    bn_axis = 3 if backend.image_data_format() == "channels_last" else 1
+    x1 = layers.BatchNormalization(
+        axis=bn_axis, epsilon=1.001e-5
+    )(x)
+    x1 = layers.Activation("relu")(x1)
+    x1 = layers.Conv2D(
+        4 * growth_rate, 1, use_bias=False
+    )(x1)
+    x1 = layers.BatchNormalization(
+        axis=bn_axis, epsilon=1.001e-5
+    )(x1)
+    x1 = layers.Activation("relu")(x1)
+    x1 = layers.Conv2D(
+        growth_rate, 3, padding="same", use_bias=False
+    )(x1)
+    x = layers.Concatenate(axis=bn_axis)([x, x1])
+    return x
+
+class SimAMModule(Layer):
+    def __init__(self, e_lambda=1e-4, **kwargs):
+        super(SimAMModule, self).__init__(**kwargs)
+        self.e_lambda = e_lambda
+
+    def build(self, input_shape):
+        super(SimAMModule, self).build(input_shape)
+
+    def call(self, x):
+        # Calculating the dimensions
+        b, h, w, c = x.shape
+
+        n = h * w - 1
+
+        # Subtracting the mean and squaring
+        x_minus_mu_square = tf.math.square(x - tf.reduce_mean(x, axis=[1, 2], keepdims=True))
+
+        # Applying the SimAM formula
+        y = x_minus_mu_square / (4 * (tf.reduce_sum(x_minus_mu_square, axis=[1, 2], keepdims=True) / n + self.e_lambda)) + 0.5
+
+        # Applying the sigmoid function
+        y = tf.sigmoid(y)
+
+        # Multiplying with the input
+        return x * y
+
+    def get_config(self):
+        config = super(SimAMModule, self).get_config()
+        config.update({
+            'e_lambda': self.e_lambda
+        })
+        return config
+
+    @staticmethod
+    def get_module_name():
+        return "simam"
 
 class CoDeepNEATModuleDenseBlock(CoDeepNEATModuleBase):
     
@@ -30,8 +145,16 @@ class CoDeepNEATModuleDenseBlock(CoDeepNEATModuleBase):
                  num_dense_blocks=1,
                  growth_rate=None,
                  reduction_rate=None,
-                 transition_layer_flag=None,
+                 activation=None,
+                 kernel_init=None,
+                 kernel_size=None,
+                 bias_init=None,
+                 dropout_flag=None,
+                 dropout_rate=None,
                  attention_module_flag=None,
+                 transition_layer_flag=None,
+                 batch_norm=None,
+                 avg_pool_flag=None,
                  self_initialization_flag=False):
         """
         Initialize a DenseBlock module
@@ -56,24 +179,34 @@ class CoDeepNEATModuleDenseBlock(CoDeepNEATModuleBase):
         self.num_dense_blocks = num_dense_blocks
         self.growth_rate = growth_rate
         self.reduction_rate = reduction_rate
-        self.transition_layer_flag = transition_layer_flag
+        self.activation = activation
+        self.kernel_init = kernel_init
+        self.kernel_size = kernel_size
+        self.bias_init = bias_init
+        self.dropout_flag = dropout_flag
+        self.dropout_rate = dropout_rate
         self.attention_module_flag = attention_module_flag
-
+        self.transition_layer_flag = transition_layer_flag
+        self.batch_norm = batch_norm
+        self.avg_pool_flag = avg_pool_flag
+        
         # Register the implementation specifics by calling parent class
         super().__init__(config_params, module_id, parent_mutation, dtype)
         
         # If self_initialization_flag is provided, initialize the module parameters
         if self_initialization_flag:
             self._initialize()
+
     def __str__(self):
         """
         Return a string representation of the DenseBlock module.
         """
         return (f"Module ID: {self.module_id}, Type: DenseBlock, Fitness: {self.fitness}, "
-                f"Num Layers: {self.num_layers}, Growth Rate: {self.growth_rate}, "
+                f"Num Layers: {self.num_layers}, Growth Rate: {self.growth_rate}, Reduction Rate: {self.reduction_rate} "
                 f"Kernel Size: {self.kernel_size}, Activation: {self.activation}, "
                 f"Batch Norm: {self.batch_norm}, Dropout Rate: {self.dropout_rate}")
 
+    
     def _initialize(self):
         """
         Initialize the dense block module with the range of parameters specified in the config file.
@@ -82,11 +215,10 @@ class CoDeepNEATModuleDenseBlock(CoDeepNEATModuleBase):
     
         # Initialize growth_rate
         self.growth_rate = random.randint(self.config_params['growth_rate']['min'], 
-                                      self.config_params['growth_rate']['max'])
-    
+                                      self.config_params['growth_rate']['max']) 
+        # Initialize reduction_rate
         self.reduction_rate = random.uniform(self.config_params['reduction_rate']['min'], 
                                       self.config_params['reduction_rate']['max'])
-    
         # Initialize num_layers
         self.num_layers = random.randint(self.config_params['num_layers']['min'], 
                                      self.config_params['num_layers']['max'])
@@ -96,105 +228,70 @@ class CoDeepNEATModuleDenseBlock(CoDeepNEATModuleBase):
     
         # Initialize other attributes, like self.fitness, self.module_id, etc., 
         # based on your existing setup, typically via calling the superclass constructor.
-        self.transition_layer_flag = random.random() < self.config_params['transition_layer_flag']
+        self.kernel_init = random.choice(self.config_params['kernel_init'])
+        self.bias_init = random.choice(self.config_params['bias_init'])
+        self.dropout_flag = random.random() < self.config_params['dropout_flag']
         self.attention_module_flag = random.random() < self.config_params['attention_module_flag']
+        self.transition_layer_flag = random.random() < self.config_params['transition_layer_flag']
+        self.avg_pool_flag = random.random() < self.config_params['avg_pool_flag']
+        self.batch_norm = random.random() < self.config_params['batch_norm']
+        self.dropout_rate = random.uniform(self.config_params['dropout_rate']['min'],
+                                             self.config_params['dropout_rate']['max'])
     
+        random_filters = random.randint(self.config_params['filters']['min'],
+                                        self.config_params['filters']['max'])
+        self.filters = round_with_step(random_filters,
+                                       self.config_params['filters']['min'],
+                                       self.config_params['filters']['max'],
+                                       self.config_params['filters']['step'])
+
     def create_downsampling_layer(self, in_shape, out_shape) -> tf.keras.layers.Layer:
         """"""
         raise NotImplementedError("Downsampling has not yet been implemented for DenseDropout Modules")
 
     def create_module_layers(self):
 
-        def dense_block(input_tensor, num_layers=self.num_layers, growth_rate=self.growth_rate):
-            concatenated_outputs = [input_tensor]
-
-            for i in range(num_layers):
-                x = input_tensor if i == 0 else tf.keras.layers.Concatenate(axis=-1)(concatenated_outputs)
-
-                x1 = layers.BatchNormalization(axis=3, epsilon=1.001e-5)(x)
-                x1 = layers.Activation("relu")(x1)
-                x1 = layers.Conv2D(4 * self.growth_rate, 1, use_bias=False)(x1)
-                x1 = layers.BatchNormalization(axis=3, epsilon=1.001e-5)(x1)
-                x1 = layers.Activation("relu")(x1)
-                x1 = layers.Conv2D(self.growth_rate, 3, padding="same", use_bias=False)(x1)
-
-                concatenated_outputs.append(x1)
-
-            return tf.keras.layers.Concatenate(axis=-1)(concatenated_outputs)
-
-        def transition_layer(input_tensor, reduction=self.reduction_rate):
-            x = input_tensor
-            
-            x = layers.BatchNormalization(axis=3, epsilon=1.001e-5)(x)
-            x = layers.Activation("relu")(x)
-            x = layers.Conv2D(int(backend.int_shape(x)[3] * reduction),1,use_bias=False,)(x)
-            x = layers.AveragePooling2D(2, strides=2)(x)
-            
-            return x
-
-        def simam_attention(input_tensor, e_lambda=1e-4):
-            """
-            SimAM attention mechanism implemented in TensorFlow.
-            Args:
-            - input_tensor: The input tensor (feature map) with dimensions [batch, height, width, channels].
-            - e_lambda: A small value for numerical stability.
-
-            Returns:
-            - Tensor with SimAM attention applied, same shape as input_tensor.
-            """
-            # Calculate the channel-wise mean
-            mean = tf.reduce_mean(input_tensor, axis=[1, 2], keepdims=True)
-    
-            # Calculate the squared difference from the mean
-            x_minus_mu_square = tf.square(input_tensor - mean)
-    
-            # Calculate n (for normalization)
-            _, h, w, _ = input_tensor.shape
-            n = h * w - 1
-
-            # Calculate the y value for scaling
-            y = x_minus_mu_square / (4 * (tf.reduce_sum(x_minus_mu_square, axis=[1, 2], keepdims=True) / n + e_lambda)) + 0.5
-
-            # Apply sigmoid activation to y
-            y = tf.sigmoid(y)
-    
-            return input_tensor * y
-
-        # Initialize empty list of layers
+       # Initialize empty list of layers
         module_layers = list()
+       
+        print('growth rate: ', self.growth_rate)
+        print('reduction rate: ', self.reduction_rate)
+        print('num layers: ', self.num_layers)
+        print('attention mod flag : ', self.attention_module_flag) 
+        print('transition layer flag : ', self.transition_layer_flag)
 
-        # Transition Layer Module
-        transition_module = lambda input_tensor: transition_layer(
-            input_tensor,
-            reduction=self.reduction_rate
-        )
+        #input_tensor = Input(shape=(None,None,None))
 
-        # Dense Block Module
-        dense_module = lambda input_tensor: dense_block(
-            input_tensor,
-            num_layers=self.num_layers,
-            growth_rate=self.growth_rate
-        )
-
-        # SimAM Module
-        simam_module = lambda input_tensor: simam_attention(input_tensor)
-
-        #module_layers.append(transition_module)
-        module_layers.append(dense_module)
+        #db = dense_block(input_tensor,self.num_layers,self.growth_rate)
         #if self.attention_module_flag:
-        #module_layers.append(simam_module)
+        #    am = SimAMModule()
         #if self.transition_layer_flag:
-        module_layers.append(transition_module)
+        #    tl = transition_layer(input_tensor,0.5)
 
-        return module_layers
+        #if self.attention_module_flag:
+        #    module_layers.append(am)
+        
+        #if self.transition_layer_flag:
+        #    module_layers.append(tl)
+        x1 = layers.BatchNormalization(
+        axis=3, epsilon=1.001e-5
+        )
+        x2 = layers.Activation("relu")(x1)
+        x3 = layers.Conv2D(4 * self.growth_rate, 1, use_bias=False)(x2)
+        x4 = layers.BatchNormalization(axis=3, epsilon=1.001e-5)(x3)
+        x5 = layers.Activation("relu")(x4)
+        x6 = layers.Conv2D(self.growth_rate, 3, padding="same", use_bias=False)(x5)
+        #x = layers.Concatenate(axis=bn_axis)([x, x1])
+        
+        return x6
 
     def create_mutation(self, offspring_id, max_degree_of_mutation):
         # Copy the parameters of this parent module for the parameters of the offspring
         offspring_params = {'num_layers': self.num_layers,
                             'growth_rate': self.growth_rate,
                             'reduction_rate': self.reduction_rate,
-                            'transition_layer_flag': self.transition_layer_flag,
-                            'attention_module_flag': self.attention_module_flag}
+                            'attention_module_flag': self.attention_module_flag,
+                            'transition_layer_flag': self.transition_layer_flag}
     
         # Create the dict that keeps track of the mutations occurring for the offspring
         parent_mutation = {'parent_id': self.module_id,
@@ -276,10 +373,13 @@ class CoDeepNEATModuleDenseBlock(CoDeepNEATModuleBase):
                                                           self.config_params['reduction_rate']['min'],
                                                           self.config_params['reduction_rate']['max'],
                                                           self.config_params['reduction_rate']['step'])
-   
+
+        # Assuming that categorical features like batch normalization or dropout are either enabled or disabled
         offspring_params['transition_layer_flag'] = self.transition_layer_flag
-        offspring_params['attention_module_flag'] = self.attention_module_flag
     
+        # Assuming that categorical features like batch normalization or dropout are either enabled or disabled
+        offspring_params['attention_module_flag'] = self.attention_module_flag 
+
         return CoDeepNEATModuleDenseBlock(config_params=self.config_params,
                                           module_id=offspring_id,
                                           parent_mutation=parent_mutation,
@@ -296,9 +396,12 @@ class CoDeepNEATModuleDenseBlock(CoDeepNEATModuleBase):
             'parent_mutation': self.parent_mutation,
             'num_layers': self.num_layers,
             'growth_rate': self.growth_rate,
-            'transition_layer_flag': self.transition_layer_flag,
-            'attention_module_flag': self.attention_module_flag,
-            'reduction_rate': self.reduction_rate # if you have this parameter
+            'activation': self.activation,
+            'kernel_init': self.kernel_init,
+            'bias_init': self.bias_init,
+            'dropout_flag': self.dropout_flag,
+            'dropout_rate': self.dropout_rate,
+            'batch_norm': self.batch_norm  # if you have this parameter
         }
 
     def get_distance(self, other_module) -> float:

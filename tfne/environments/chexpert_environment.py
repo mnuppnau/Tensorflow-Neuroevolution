@@ -140,5 +140,5 @@ class CheXpertEnvironment(BaseEnvironment):
         return 224, 224, 3  # Replace with the actual dimensions
 
     def get_output_shape(self) -> (int,):
-        return (14,)  # 14 tasks in CheXpert multi-label classification
+        return (5,)  # 14 tasks in CheXpert multi-label classification
 

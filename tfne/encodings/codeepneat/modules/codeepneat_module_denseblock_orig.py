@@ -3,20 +3,13 @@ from __future__ import annotations
 import math
 import random
 import statistics
-import tensorflow.compat.v2 as tf
+
 import numpy as np
 import tensorflow as tf
 
 from .codeepneat_module_base import CoDeepNEATModuleBase
 from tfne.helper_functions import round_with_step
-from keras import backend
-from keras.applications import imagenet_utils
-from keras.engine import training
-from keras.layers import VersionAwareLayers
-from keras.utils import data_utils
-from keras.utils import layer_utils
 
-layers = VersionAwareLayers()
 
 class CoDeepNEATModuleDenseBlock(CoDeepNEATModuleBase):
     
@@ -29,9 +22,14 @@ class CoDeepNEATModuleDenseBlock(CoDeepNEATModuleBase):
                  num_layers=1,
                  num_dense_blocks=1,
                  growth_rate=None,
-                 reduction_rate=None,
-                 transition_layer_flag=None,
-                 attention_module_flag=None,
+                 activation=None,
+                 kernel_init=None,
+                 kernel_size=None,
+                 bias_init=None,
+                 dropout_flag=None,
+                 dropout_rate=None,
+                 batch_norm=None,
+                 avg_pool_flag=None,
                  self_initialization_flag=False):
         """
         Initialize a DenseBlock module
@@ -55,10 +53,15 @@ class CoDeepNEATModuleDenseBlock(CoDeepNEATModuleBase):
         self.num_layers = num_layers
         self.num_dense_blocks = num_dense_blocks
         self.growth_rate = growth_rate
-        self.reduction_rate = reduction_rate
-        self.transition_layer_flag = transition_layer_flag
-        self.attention_module_flag = attention_module_flag
-
+        self.activation = activation
+        self.kernel_init = kernel_init
+        self.kernel_size = kernel_size
+        self.bias_init = bias_init
+        self.dropout_flag = dropout_flag
+        self.dropout_rate = dropout_rate
+        self.batch_norm = batch_norm
+        self.avg_pool_flag = avg_pool_flag
+        
         # Register the implementation specifics by calling parent class
         super().__init__(config_params, module_id, parent_mutation, dtype)
         
@@ -84,9 +87,6 @@ class CoDeepNEATModuleDenseBlock(CoDeepNEATModuleBase):
         self.growth_rate = random.randint(self.config_params['growth_rate']['min'], 
                                       self.config_params['growth_rate']['max'])
     
-        self.reduction_rate = random.uniform(self.config_params['reduction_rate']['min'], 
-                                      self.config_params['reduction_rate']['max'])
-    
         # Initialize num_layers
         self.num_layers = random.randint(self.config_params['num_layers']['min'], 
                                      self.config_params['num_layers']['max'])
@@ -96,61 +96,85 @@ class CoDeepNEATModuleDenseBlock(CoDeepNEATModuleBase):
     
         # Initialize other attributes, like self.fitness, self.module_id, etc., 
         # based on your existing setup, typically via calling the superclass constructor.
-        self.transition_layer_flag = random.random() < self.config_params['transition_layer_flag']
-        self.attention_module_flag = random.random() < self.config_params['attention_module_flag']
+        self.kernel_init = random.choice(self.config_params['kernel_init'])
+        self.bias_init = random.choice(self.config_params['bias_init'])
+        self.dropout_flag = random.random() < self.config_params['dropout_flag']
+        self.avg_pool_flag = random.random() < self.config_params['avg_pool_flag']
+        self.batch_norm = random.random() < self.config_params['batch_norm']
+        self.dropout_rate = random.uniform(self.config_params['dropout_rate']['min'],
+                                             self.config_params['dropout_rate']['max'])
     
+        random_filters = random.randint(self.config_params['filters']['min'],
+                                        self.config_params['filters']['max'])
+        self.filters = round_with_step(random_filters,
+                                       self.config_params['filters']['min'],
+                                       self.config_params['filters']['max'],
+                                       self.config_params['filters']['step'])
+
     def create_downsampling_layer(self, in_shape, out_shape) -> tf.keras.layers.Layer:
         """"""
         raise NotImplementedError("Downsampling has not yet been implemented for DenseDropout Modules")
 
     def create_module_layers(self):
 
-        def dense_block(input_tensor, num_layers=self.num_layers, growth_rate=self.growth_rate):
+        def dense_block(input_tensor, num_layers=3, num_filters=32, activation_type='relu', dropout_rate=0.5, batch_norm_flag=True, activation_flag=True, dropout_flag=True):
             concatenated_outputs = [input_tensor]
 
             for i in range(num_layers):
                 x = input_tensor if i == 0 else tf.keras.layers.Concatenate(axis=-1)(concatenated_outputs)
 
-                x1 = layers.BatchNormalization(axis=3, epsilon=1.001e-5)(x)
-                x1 = layers.Activation("relu")(x1)
-                x1 = layers.Conv2D(4 * self.growth_rate, 1, use_bias=False)(x1)
-                x1 = layers.BatchNormalization(axis=3, epsilon=1.001e-5)(x1)
-                x1 = layers.Activation("relu")(x1)
-                x1 = layers.Conv2D(self.growth_rate, 3, padding="same", use_bias=False)(x1)
+                if batch_norm_flag:
+                    x = tf.keras.layers.BatchNormalization()(x)
 
-                concatenated_outputs.append(x1)
+                if activation_flag:
+                    x = tf.keras.layers.Activation(activation_type)(x)
+                x = tf.keras.layers.Conv2D(num_filters, (3, 3), padding='same')(x)
+
+                if dropout_flag:
+                    x = tf.keras.layers.Dropout(dropout_rate)(x)
+
+                concatenated_outputs.append(x)
 
             return tf.keras.layers.Concatenate(axis=-1)(concatenated_outputs)
 
-        def transition_layer(input_tensor, reduction=self.reduction_rate):
+        def transition_layer(input_tensor, num_filters=32, activation_type='relu', dropout_rate=0.5, batch_norm_flag=True, activation_flag=True, dropout_flag=True, pooling_flag=True):
             x = input_tensor
-            
-            x = layers.BatchNormalization(axis=3, epsilon=1.001e-5)(x)
-            x = layers.Activation("relu")(x)
-            x = layers.Conv2D(int(backend.int_shape(x)[3] * reduction),1,use_bias=False,)(x)
-            x = layers.AveragePooling2D(2, strides=2)(x)
-            
+
+            if batch_norm_flag:
+                x = tf.keras.layers.BatchNormalization()(x)
+
+            if activation_flag:
+                x = tf.keras.layers.Activation(activation_type)(x)
+        
+            x = tf.keras.layers.Conv2D(num_filters, (1, 1), padding='same')(x)
+    
+            if dropout_flag:
+                x = tf.keras.layers.Dropout(dropout_rate)(x)
+        
+            if pooling_flag:
+                x = tf.keras.layers.AveragePooling2D((2, 2), strides=2)(x)
+        
             return x
 
         def simam_attention(input_tensor, e_lambda=1e-4):
             """
-            SimAM attention mechanism implemented in TensorFlow.
+            SimAM attention mechanism (TensorFlow), made similar to the PyTorch version.
             Args:
-            - input_tensor: The input tensor (feature map) with dimensions [batch, height, width, channels].
-            - e_lambda: A small value for numerical stability.
+            - input_tensor: The input tensor (feature map) on which attention needs to be applied.
+            - e_lambda: A small value for stability.
 
             Returns:
-            - Tensor with SimAM attention applied, same shape as input_tensor.
+            - Output tensor after applying SimAM attention.
             """
             # Calculate the channel-wise mean
             mean = tf.reduce_mean(input_tensor, axis=[1, 2], keepdims=True)
     
-            # Calculate the squared difference from the mean
+            # Calculate the squared difference
             x_minus_mu_square = tf.square(input_tensor - mean)
     
             # Calculate n (for normalization)
-            _, h, w, _ = input_tensor.shape
-            n = h * w - 1
+            _, _, h, w = input_tensor.shape
+            n = w * h - 1
 
             # Calculate the y value for scaling
             y = x_minus_mu_square / (4 * (tf.reduce_sum(x_minus_mu_square, axis=[1, 2], keepdims=True) / n + e_lambda)) + 0.5
@@ -166,14 +190,25 @@ class CoDeepNEATModuleDenseBlock(CoDeepNEATModuleBase):
         # Transition Layer Module
         transition_module = lambda input_tensor: transition_layer(
             input_tensor,
-            reduction=self.reduction_rate
+            num_filters=self.filters,
+            activation_type='relu',
+            dropout_rate=self.dropout_rate,
+            batch_norm_flag=self.batch_norm,
+            activation_flag=self.activation,
+            dropout_flag=self.dropout_flag,
+            pooling_flag=self.avg_pool_flag
         )
 
         # Dense Block Module
         dense_module = lambda input_tensor: dense_block(
             input_tensor,
             num_layers=self.num_layers,
-            growth_rate=self.growth_rate
+            num_filters=self.filters,
+            activation_type='relu',
+            dropout_rate=self.dropout_rate,
+            batch_norm_flag=self.batch_norm,
+            activation_flag=self.activation,
+            dropout_flag=self.dropout_flag
         )
 
         # SimAM Module
@@ -181,9 +216,7 @@ class CoDeepNEATModuleDenseBlock(CoDeepNEATModuleBase):
 
         #module_layers.append(transition_module)
         module_layers.append(dense_module)
-        #if self.attention_module_flag:
-        #module_layers.append(simam_module)
-        #if self.transition_layer_flag:
+        module_layers.append(simam_module)
         module_layers.append(transition_module)
 
         return module_layers
@@ -192,9 +225,8 @@ class CoDeepNEATModuleDenseBlock(CoDeepNEATModuleBase):
         # Copy the parameters of this parent module for the parameters of the offspring
         offspring_params = {'num_layers': self.num_layers,
                             'growth_rate': self.growth_rate,
-                            'reduction_rate': self.reduction_rate,
-                            'transition_layer_flag': self.transition_layer_flag,
-                            'attention_module_flag': self.attention_module_flag}
+                            'batch_norm': self.batch_norm,
+                            'dropout_flag': self.dropout_flag}
     
         # Create the dict that keeps track of the mutations occurring for the offspring
         parent_mutation = {'parent_id': self.module_id,
@@ -221,20 +253,13 @@ class CoDeepNEATModuleDenseBlock(CoDeepNEATModuleBase):
                                                       min(self.config_params['growth_rate']['max'], perturbed_growth_rate))
                 parent_mutation['mutated_params']['growth_rate'] = self.growth_rate
     
-            elif param_to_mutate == 'reduction_rate':
-                perturbed_reduction_rate = np.random.normal(loc=self.reduction_rate, 
-                                                         scale=self.config_params['reduction_rate']['stddev'])
-                offspring_params['reduction_rate'] = max(self.config_params['reduction_rate']['min'], 
-                                                      min(self.config_params['reduction_rate']['max'], perturbed_reduction_rate))
-                parent_mutation['mutated_params']['reduction_rate'] = self.reduction_rate
+            elif param_to_mutate == 'batch_norm':
+                offspring_params['batch_norm'] = not self.batch_norm
+                parent_mutation['mutated_params']['batch_norm'] = self.batch_norm
     
-            elif param_to_mutate == 'transition_layer_flag':
-                offspring_params['transition_layer_flag'] = not self.transition_layer_flag
-                parent_mutation['mutated_params']['transition_layer_flag'] = self.transition_layer_flag
-    
-            elif param_to_mutate == 'attention_module_flag':
-                offspring_params['attention_module_flag'] = not self.attention_module_flag
-                parent_mutation['mutated_params']['attention_module_flag'] = self.attention_module_flag
+            elif param_to_mutate == 'dropout':
+                offspring_params['dropout'] = not self.dropout
+                parent_mutation['mutated_params']['dropout'] = self.dropout
     
         return CoDeepNEATModuleDenseBlock(config_params=self.config_params,
                                           module_id=offspring_id,
@@ -271,14 +296,20 @@ class CoDeepNEATModuleDenseBlock(CoDeepNEATModuleBase):
                                                           self.config_params['growth_rate']['min'],
                                                           self.config_params['growth_rate']['max'],
                                                           self.config_params['growth_rate']['step'])
-   
-        offspring_params['reduction_rate'] = round_with_step((self.reduction_rate + less_fit_module.reduction_rate) / 2,
-                                                          self.config_params['reduction_rate']['min'],
-                                                          self.config_params['reduction_rate']['max'],
-                                                          self.config_params['reduction_rate']['step'])
-   
-        offspring_params['transition_layer_flag'] = self.transition_layer_flag
-        offspring_params['attention_module_flag'] = self.attention_module_flag
+    
+        # Additional parameters commonly found in dense and dropout layers
+        offspring_params['activation'] = self.activation
+        offspring_params['kernel_init'] = self.kernel_init
+        offspring_params['bias_init'] = self.bias_init
+        offspring_params['dropout_flag'] = self.dropout_flag
+        offspring_params['dropout_rate'] = round_with_step((self.dropout_rate + less_fit_module.dropout_rate) / 2,
+                                                           self.config_params['dropout_rate']['min'],
+                                                           self.config_params['dropout_rate']['max'],
+                                                           self.config_params['dropout_rate']['step'])
+    
+        # Assuming that categorical features like batch normalization or dropout are either enabled or disabled
+        offspring_params['batch_norm'] = self.batch_norm
+        offspring_params['dropout_flag'] = self.dropout_flag
     
         return CoDeepNEATModuleDenseBlock(config_params=self.config_params,
                                           module_id=offspring_id,
@@ -296,9 +327,12 @@ class CoDeepNEATModuleDenseBlock(CoDeepNEATModuleBase):
             'parent_mutation': self.parent_mutation,
             'num_layers': self.num_layers,
             'growth_rate': self.growth_rate,
-            'transition_layer_flag': self.transition_layer_flag,
-            'attention_module_flag': self.attention_module_flag,
-            'reduction_rate': self.reduction_rate # if you have this parameter
+            'activation': self.activation,
+            'kernel_init': self.kernel_init,
+            'bias_init': self.bias_init,
+            'dropout_flag': self.dropout_flag,
+            'dropout_rate': self.dropout_rate,
+            'batch_norm': self.batch_norm  # if you have this parameter
         }
 
     def get_distance(self, other_module) -> float:
