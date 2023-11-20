@@ -1,5 +1,11 @@
 from absl import app, flags, logging
+import sys
 
+sys.path.append('/tmp/')
+
+print("sys path : ",sys.path)
+
+import tensorflow as tf
 import tfne
 
 flags.DEFINE_integer('logging_level',
@@ -25,8 +31,8 @@ def codeepneat_mnist_example(_):
     """
     # Set standard configuration specific to TFNE but not the neuroevolution process
     logging_level = logging.INFO
-    config_file_path = './codeepneat_mnist_example_config.cfg'
-    backup_dir_path = './tfne_state_backups/'
+    config_file_path = '/tmp/examples/codeepneat/codeepneat_mnist_example/codeepneat_mnist_example_config.cfg'
+    backup_dir_path = '/tmp/examples/codeepneat/codeepneat_mnist_example/tfne_state_backups/'
     max_generations = 72
     max_fitness = None
 

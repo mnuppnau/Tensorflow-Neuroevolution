@@ -70,6 +70,7 @@ class MNISTEnvironment(BaseEnvironment):
         """
         # Get model and optimizer required for compilation
         model = genome.get_model()
+        model.summary()
         optimizer = genome.get_optimizer()
 
         # Compile and train model
@@ -101,6 +102,7 @@ class MNISTEnvironment(BaseEnvironment):
         # Determine fitness by creating model predictions with test images and then judging the fitness based on the
         # achieved model accuracy.
         model = genome.get_model()
+        print(model.summary())
         self.accuracy_metric.reset_states()
         self.accuracy_metric.update_state(self.test_labels, np.argmax(model(self.test_images), axis=-1))
         evaluated_fitness = round(self.accuracy_metric.result().numpy() * 100, 4)
