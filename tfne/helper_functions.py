@@ -135,10 +135,14 @@ def load_chexpert_data(root_dir='./data', batch_size=32, resize=None):
 
     # Apply the function to the dataset
     train_dataset = train_dataset.map(load_and_preprocess)
+    train_dataset = train_dataset.shuffle(buffer_size=2048) 
     train_dataset = train_dataset.batch(batch_size)
+    train_dataset = train_dataset.prefetch(tf.data.experimental.AUTOTUNE)
     test_dataset = test_dataset.map(load_and_preprocess)
+    test_dataset = test_dataset.shuffle(buffer_size=2048)
     test_dataset = test_dataset.batch(batch_size)
-
+    test_dataset = test_dataset.prefetch(tf.data.experimental.AUTOTUNE)
+    
     # Pull a single batch from the training dataset
     #for image_batch, label_batch in train_dataset.take(1):
     #    print("Image batch shape: ", image_batch.shape)
@@ -176,6 +180,30 @@ def read_option_from_config(config, section, option) -> Any:
     print("Config value for '{}/{}': {}".format(section, option, value))
     return value
 
+def select_random_value(min_val, max_val, step, stddev, threshold=4):
+    """
+    Selects a random value based on min, max, step, and stddev.
+    
+    :param min_val: Minimum value for the parameter
+    :param max_val: Maximum value for the parameter
+    :param step: Step size between possible values
+    :param stddev: Standard deviation for the normal distribution
+    :return: Selected random value
+    """
+    # Calculate the mean (you can adjust this if you want a different distribution)
+    mean = (max_val + min_val) / 2
+
+    # Generate a value from a normal distribution
+    initial_value = np.random.normal(loc=mean, scale=stddev)
+
+    # Use round_with_step function to get the final value
+    final_value = round_with_step(initial_value, min_val, max_val, step)
+    
+    # Check if final_value is below the threshold
+    if final_value < threshold:
+        final_value = threshold
+
+    return final_value
 
 def round_with_step(value, minimum, maximum, step) -> Union[int, float]:
     """

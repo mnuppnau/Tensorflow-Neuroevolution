@@ -4,6 +4,7 @@ import sys
 sys.path.append('/tmp/')
 
 print("sys path : ",sys.path)
+
 import tensorflow as tf
 
 import tfne
@@ -26,7 +27,6 @@ flags.DEFINE_integer('max_generations',
 flags.DEFINE_float('max_fitness',
                    default=None, help='Float parameter specifying the fitness of the best genome at which point the '
                                       'evolutionary process should preemptively end')
-
 
 def codeepneat_chexpert_example(_):
     """

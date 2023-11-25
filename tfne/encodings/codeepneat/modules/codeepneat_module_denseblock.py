@@ -7,8 +7,9 @@ import tensorflow.compat.v2 as tf
 import numpy as np
 import tensorflow as tf
 
+from absl import logging
 from .codeepneat_module_base import CoDeepNEATModuleBase
-from tfne.helper_functions import round_with_step
+from tfne.helper_functions import round_with_step, select_random_value
 from keras import backend
 from keras.applications import imagenet_utils
 from keras.engine import training
@@ -18,6 +19,12 @@ from keras.utils import layer_utils
 
 layers = VersionAwareLayers()
 
+logging.use_absl_handler()
+
+logging.get_absl_handler().use_absl_log_file('absl_logging', './logs') 
+#absl.flags.FLAGS.mark_as_parsed() 
+logging.set_verbosity(logging.INFO)
+
 class CoDeepNEATModuleDenseBlock(CoDeepNEATModuleBase):
     
     def __init__(self, 
@@ -25,13 +32,10 @@ class CoDeepNEATModuleDenseBlock(CoDeepNEATModuleBase):
                  module_id, 
                  parent_mutation, 
                  dtype,
-                 filters=None,
-                 num_layers=1,
-                 num_dense_blocks=1,
+                 num_layers=4,
                  growth_rate=None,
                  reduction_rate=None,
-                 transition_layer_flag=None,
-                 attention_module_flag=None,
+                 simam_placed_in_db=None,
                  self_initialization_flag=False):
         """
         Initialize a DenseBlock module
@@ -51,13 +55,10 @@ class CoDeepNEATModuleDenseBlock(CoDeepNEATModuleBase):
         self.module_id = module_id
         self.parent_mutation = parent_mutation
         self.dtype = dtype
-        self.filters = filters
         self.num_layers = num_layers
-        self.num_dense_blocks = num_dense_blocks
         self.growth_rate = growth_rate
         self.reduction_rate = reduction_rate
-        self.transition_layer_flag = transition_layer_flag
-        self.attention_module_flag = attention_module_flag
+        self.simam_placed_in_db = simam_placed_in_db
 
         # Register the implementation specifics by calling parent class
         super().__init__(config_params, module_id, parent_mutation, dtype)
@@ -71,8 +72,7 @@ class CoDeepNEATModuleDenseBlock(CoDeepNEATModuleBase):
         """
         return (f"Module ID: {self.module_id}, Type: DenseBlock, Fitness: {self.fitness}, "
                 f"Num Layers: {self.num_layers}, Growth Rate: {self.growth_rate}, "
-                f"Kernel Size: {self.kernel_size}, Activation: {self.activation}, "
-                f"Batch Norm: {self.batch_norm}, Dropout Rate: {self.dropout_rate}")
+                f"Reduction Rate: {self.reduction_rate}, SimAM Placed in DB: {self.simam_placed_in_db}")
 
     def _initialize(self):
         """
@@ -81,24 +81,31 @@ class CoDeepNEATModuleDenseBlock(CoDeepNEATModuleBase):
         """
     
         # Initialize growth_rate
-        self.growth_rate = random.randint(self.config_params['growth_rate']['min'], 
-                                      self.config_params['growth_rate']['max'])
-    
-        self.reduction_rate = random.uniform(self.config_params['reduction_rate']['min'], 
-                                      self.config_params['reduction_rate']['max'])
-    
-        # Initialize num_layers
-        self.num_layers = random.randint(self.config_params['num_layers']['min'], 
-                                     self.config_params['num_layers']['max'])
-    
-        # Initialize activation
-        self.activation = random.choice(self.config_params['activation'])
-    
-        # Initialize other attributes, like self.fitness, self.module_id, etc., 
-        # based on your existing setup, typically via calling the superclass constructor.
-        self.transition_layer_flag = random.random() < self.config_params['transition_layer_flag']
-        self.attention_module_flag = random.random() < self.config_params['attention_module_flag']
-    
+        self.growth_rate = select_random_value(self.config_params['growth_rate']['min'], 
+                                               self.config_params['growth_rate']['max'],
+                                               self.config_params['growth_rate']['step'],
+                                               self.config_params['growth_rate']['stddev'])
+   
+        random_reduction_rate = random.uniform(self.config_params['reduction_rate']['min'],
+                                             self.config_params['reduction_rate']['max'])
+        
+        self.reduction_rate = round_with_step(random_reduction_rate,
+                                            self.config_params['reduction_rate']['min'],
+                                            self.config_params['reduction_rate']['max'],
+                                            self.config_params['reduction_rate']['step'])
+
+        self.num_layers = select_random_value(self.config_params['num_layers']['min'], 
+                                               self.config_params['num_layers']['max'],
+                                               self.config_params['num_layers']['step'],
+                                               self.config_params['num_layers']['stddev'])
+     
+        self.simam_placed_in_db = random.random() < self.config_params['simam_placed_in_db']
+   
+        logging.info('growth rate is %d',self.growth_rate)
+        logging.info('reduction rate is %f',self.reduction_rate)
+        logging.info('number of layers is %d',self.num_layers)
+        logging.info('simam placed inside dense block is %d',self.simam_placed_in_db)
+
     def create_downsampling_layer(self, in_shape, out_shape) -> tf.keras.layers.Layer:
         """"""
         raise NotImplementedError("Downsampling has not yet been implemented for DenseDropout Modules")
@@ -160,8 +167,51 @@ class CoDeepNEATModuleDenseBlock(CoDeepNEATModuleBase):
     
             return input_tensor * y
 
+        def dense_block_w_simam(input_tensor, num_layers=self.num_layers, growth_rate=self.growth_rate):
+            concatenated_outputs = [input_tensor]
+
+            for i in range(num_layers):
+                x = input_tensor if i == 0 else tf.keras.layers.Concatenate(axis=-1)(concatenated_outputs)
+
+                x1 = layers.BatchNormalization(axis=3, epsilon=1.001e-5)(x)
+                x1 = layers.Activation("relu")(x1)
+                x1 = layers.Conv2D(4 * self.growth_rate, 1, use_bias=False)(x1)
+                x1 = layers.BatchNormalization(axis=3, epsilon=1.001e-5)(x1)
+                x1 = layers.Activation("relu")(x1)
+                x1 = layers.Conv2D(self.growth_rate, 3, padding="same", use_bias=False)(x1)
+
+                if i == num_layers-1:
+                    x1 = simam_attention(x1)
+                
+                concatenated_outputs.append(x1)
+
+            return tf.keras.layers.Concatenate(axis=-1)(concatenated_outputs)
+
+
         # Initialize empty list of layers
         module_layers = list()
+
+        if self.simam_placed_in_db:
+            # Dense Block Module
+            dense_module = lambda input_tensor: dense_block_w_simam(
+                input_tensor,
+                num_layers=self.num_layers,
+                growth_rate=self.growth_rate
+            )
+        else:
+            # Dense Block Module
+            dense_module = lambda input_tensor: dense_block(
+                input_tensor,
+                num_layers=self.num_layers,
+                growth_rate=self.growth_rate
+            )
+
+        module_layers.append(dense_module)
+
+        if not self.simam_placed_in_db:
+            # SimAM Module
+            simam_module = lambda input_tensor: simam_attention(input_tensor)
+            module_layers.append(simam_module)
 
         # Transition Layer Module
         transition_module = lambda input_tensor: transition_layer(
@@ -169,21 +219,6 @@ class CoDeepNEATModuleDenseBlock(CoDeepNEATModuleBase):
             reduction=self.reduction_rate
         )
 
-        # Dense Block Module
-        dense_module = lambda input_tensor: dense_block(
-            input_tensor,
-            num_layers=self.num_layers,
-            growth_rate=self.growth_rate
-        )
-
-        # SimAM Module
-        simam_module = lambda input_tensor: simam_attention(input_tensor)
-
-        #module_layers.append(transition_module)
-        module_layers.append(dense_module)
-        #if self.attention_module_flag:
-        #module_layers.append(simam_module)
-        #if self.transition_layer_flag:
         module_layers.append(transition_module)
 
         return module_layers
@@ -193,8 +228,7 @@ class CoDeepNEATModuleDenseBlock(CoDeepNEATModuleBase):
         offspring_params = {'num_layers': self.num_layers,
                             'growth_rate': self.growth_rate,
                             'reduction_rate': self.reduction_rate,
-                            'transition_layer_flag': self.transition_layer_flag,
-                            'attention_module_flag': self.attention_module_flag}
+                            'simam_placed_in_db': self.simam_placed_in_db}
     
         # Create the dict that keeps track of the mutations occurring for the offspring
         parent_mutation = {'parent_id': self.module_id,
@@ -210,33 +244,37 @@ class CoDeepNEATModuleDenseBlock(CoDeepNEATModuleBase):
         for param_to_mutate in parameters_to_mutate:
             if param_to_mutate == 'num_layers':
                 perturbed_layers = int(np.random.normal(loc=self.num_layers, scale=self.config_params['num_layers']['stddev']))
-                offspring_params['num_layers'] = max(self.config_params['num_layers']['min'], 
-                                                     min(self.config_params['num_layers']['max'], perturbed_layers))
+                offspring_params['num_layers'] = round_with_step(perturbed_num_layers,
+                                                              self.config_params['num_layers']['min'],
+                                                              self.config_params['num_layers']['max'],
+                                                              self.config_params['num_layers']['step']) 
                 parent_mutation['mutated_params']['num_layers'] = self.num_layers
                 
             elif param_to_mutate == 'growth_rate':
-                perturbed_growth_rate = np.random.normal(loc=self.growth_rate, 
-                                                         scale=self.config_params['growth_rate']['stddev'])
-                offspring_params['growth_rate'] = max(self.config_params['growth_rate']['min'], 
-                                                      min(self.config_params['growth_rate']['max'], perturbed_growth_rate))
+                perturbed_layers = int(np.random.normal(loc=self.num_layers, scale=self.config_params['num_layers']['stddev']))
+                offspring_params['num_layers'] = round_with_step(perturbed_num_layers,
+                                                              self.config_params['num_layers']['min'],
+                                                              self.config_params['num_layers']['max'],
+                                                              self.config_params['num_layers']['step']) 
+               
                 parent_mutation['mutated_params']['growth_rate'] = self.growth_rate
     
             elif param_to_mutate == 'reduction_rate':
-                perturbed_reduction_rate = np.random.normal(loc=self.reduction_rate, 
-                                                         scale=self.config_params['reduction_rate']['stddev'])
-                offspring_params['reduction_rate'] = max(self.config_params['reduction_rate']['min'], 
-                                                      min(self.config_params['reduction_rate']['max'], perturbed_reduction_rate))
+                perturbed_reduction_rate = np.random.normal(loc=self.reduction_rate,
+                                                          scale=self.config_params['reduction_rate']['stddev'])
+                
+                offspring_params['reduction_rate'] = round_with_step(perturbed_reduction_rate,
+                                                                   self.config_params['reduction_rate']['min'],
+                                                                   self.config_params['reduction_rate']['max'],
+                                                                   self.config_params['reduction_rate']['step'])
+
                 parent_mutation['mutated_params']['reduction_rate'] = self.reduction_rate
     
-            elif param_to_mutate == 'transition_layer_flag':
-                offspring_params['transition_layer_flag'] = not self.transition_layer_flag
-                parent_mutation['mutated_params']['transition_layer_flag'] = self.transition_layer_flag
-    
-            elif param_to_mutate == 'attention_module_flag':
-                offspring_params['attention_module_flag'] = not self.attention_module_flag
-                parent_mutation['mutated_params']['attention_module_flag'] = self.attention_module_flag
-    
-        return CoDeepNEATModuleDenseBlock(config_params=self.config_params,
+            elif param_to_mutate == 'simam_placed_in_db':
+                offspring_params['simam_placed_in_db'] = not self.simam_placed_in_db
+                parent_mutation['mutated_params']['simam_placed_in_db'] = self.simam_placed_in_db
+   
+            return CoDeepNEATModuleDenseBlock(config_params=self.config_params,
                                           module_id=offspring_id,
                                           parent_mutation=parent_mutation,
                                           dtype=self.dtype,
@@ -267,7 +305,7 @@ class CoDeepNEATModuleDenseBlock(CoDeepNEATModuleBase):
                                                          self.config_params['num_layers']['max'],
                                                          self.config_params['num_layers']['step'])
     
-        offspring_params['growth_rate'] = round_with_step((self.growth_rate + less_fit_module.growth_rate) / 2,
+        offspring_params['growth_rate'] = round_with_step(int((self.growth_rate + less_fit_module.growth_rate) / 2),
                                                           self.config_params['growth_rate']['min'],
                                                           self.config_params['growth_rate']['max'],
                                                           self.config_params['growth_rate']['step'])
@@ -277,8 +315,7 @@ class CoDeepNEATModuleDenseBlock(CoDeepNEATModuleBase):
                                                           self.config_params['reduction_rate']['max'],
                                                           self.config_params['reduction_rate']['step'])
    
-        offspring_params['transition_layer_flag'] = self.transition_layer_flag
-        offspring_params['attention_module_flag'] = self.attention_module_flag
+        offspring_params['simam_placed_in_db'] = self.simam_placed_in_db
     
         return CoDeepNEATModuleDenseBlock(config_params=self.config_params,
                                           module_id=offspring_id,
@@ -296,8 +333,7 @@ class CoDeepNEATModuleDenseBlock(CoDeepNEATModuleBase):
             'parent_mutation': self.parent_mutation,
             'num_layers': self.num_layers,
             'growth_rate': self.growth_rate,
-            'transition_layer_flag': self.transition_layer_flag,
-            'attention_module_flag': self.attention_module_flag,
+            'simam_placed_in_db': self.simam_placed_in_db,
             'reduction_rate': self.reduction_rate # if you have this parameter
         }
 
@@ -323,15 +359,19 @@ class CoDeepNEATModuleDenseBlock(CoDeepNEATModuleBase):
         if self.activation == other_module.activation:
             congruence_list.append(1.0)
         else:
-            congruence_list.append(1 / len(self.config_params['activation']))
+            congruence_list.append(1 / len(self.config_params['num_layers']))
         if self.kernel_init == other_module.kernel_init:
             congruence_list.append(1.0)
         else:
-            congruence_list.append(1 / len(self.config_params['kernel_init']))
+            congruence_list.append(1 / len(self.config_params['growth_rate']))
+        if self.kernel_init == other_module.kernel_init:
+            congruence_list.append(1.0)
+        else:
+            congruence_list.append(1 / len(self.config_params['simam_placed_in_db'])) 
         if self.bias_init == other_module.bias_init:
             congruence_list.append(1.0)
         else:
-            congruence_list.append(1 / len(self.config_params['bias_init']))
+            congruence_list.append(1 / len(self.config_params['reduction_rate']))
         congruence_list.append(abs(self.dropout_flag - other_module.dropout_flag))
         if self.dropout_rate >= other_module.dropout_rate:
             congruence_list.append(other_module.dropout_rate / self.dropout_rate)

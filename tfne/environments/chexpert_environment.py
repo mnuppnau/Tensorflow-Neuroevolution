@@ -1,8 +1,10 @@
 from .base_environment import BaseEnvironment
+from tensorflow.keras.metrics import BinaryAccuracy,AUC
 from tfne.helper_functions import read_option_from_config
 from tfne.helper_functions import load_chexpert_data
 from tfne.helper_functions import set_tensorflow_memory_growth
 from tqdm.keras import TqdmCallback
+from tensorflow.keras.callbacks import EarlyStopping
 
 import tensorflow as tf
 import numpy as np
@@ -15,7 +17,8 @@ class CheXpertEnvironment(BaseEnvironment):
         print("Data loaded")
         
         #self.accuracy_metric = tf.keras.metrics.AUC(multi_label=True)  # Using AUC for multi-label classification             
-        self.accuracy_metric = tf.keras.metrics.BinaryAccuracy(threshold=0.5)
+        self.accuracy_metric = tf.keras.metrics.BinaryAccuracy()
+        self.accuracy_list = ['binary_accuracy','accuracy',AUC(name='auc',multi_label=True)]
         self.verbosity = verbosity                                                                                                                                           
 
         if not weight_training:                                                                                                                                                 
@@ -46,17 +49,7 @@ class CheXpertEnvironment(BaseEnvironment):
         # TO BE OVERRIDEN
         raise RuntimeError()
 
-    def _eval_genome_fitness_weight_training(self, genome) -> float:                                                                              
-        
-        #set_tensorflow_memory_growth()
-        # Pull a single batch from the training dataset
-        #for image_batch, label_batch in self.train_dataset.take(1):
-        #    print("Image batch shape: ", image_batch.shape)
-        #    print("Label batch shape: ", label_batch.shape)
-        #    # Print the first few values of the first image in the batch
-        #    print("First few pixel values of the first image in batch: ", image_batch[0].numpy()[0][0])
-        #    # Print the first label in the batch
-        #    print("First label in batch:", label_batch[0].numpy())
+    def _eval_genome_fitness_weight_training(self, genome) -> float:
         try:
             model = genome.get_model()                                                                                                                                    
             model.summary()
@@ -64,11 +57,11 @@ class CheXpertEnvironment(BaseEnvironment):
             print('model compiling,...........')
             model.compile(optimizer=optimizer,                                                                                                                          
                           loss=tf.keras.losses.BinaryCrossentropy(from_logits=False),                                                                      
-                          metrics=[self.accuracy_metric])                                                                                                                   
+                          metrics=[self.accuracy_list])                                                                                                                   
             print('Starting model training,...............')
             model.fit(self.train_dataset,
                       epochs=self.epochs,                                                                                                                                        
-                      verbose=2, callbacks=[TqdmCallback(verbose=2)])                                                                                                                                    
+                      verbose=2)                                                                                                                                    
 
             print('Model training complete,...............')
             #predictions = model.predict(self.test_dataset)
@@ -78,32 +71,15 @@ class CheXpertEnvironment(BaseEnvironment):
             # Iterate over the test dataset batch by batch
             i = 0
             for image_batch, label_batch in self.test_dataset:
-                #print('In for loop : ')
-                #print(f"Shape of label_batch1: {label_batch.shape}")
-                #print(f"Shape of image_batch1: {image_batch.shape}")
-                i = i+1
-                print('batch number : ', i)
-                # Make predictions using your model
-                # Assume 'model' is your trained model
                 predictions = model.predict_on_batch(image_batch)
-                # Update the state of the accuracy metric with the current batch
-                #print("past prediction ,...........")
                 self.accuracy_metric.update_state(label_batch, predictions)
-                #print(f"Shape of predictions: {predictions.shape}")
-                #print(f"Shape of label_batch: {label_batch.shape}")
            
-            #if np.any(np.isnan(predictions)):
-            #    print("Encountered NaN in predictions. Setting fitness to a low value.")
-            #    return -1.0
-
             # After iterating over the test dataset and updating metric states
             final_accuracy = self.accuracy_metric.result().numpy()
 
             # Return the final_accuracy, rounded and multiplied by 100
             return round(final_accuracy * 100, 4)
 
-
-        
         except Exception as e:
             # Handle exceptions that occurred during training or evaluation
             print(f"An exception occurred during training or evaluation: {e}")
