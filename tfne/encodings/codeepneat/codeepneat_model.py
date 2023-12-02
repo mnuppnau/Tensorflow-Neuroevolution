@@ -105,7 +105,7 @@ class CoDeepNEATModel:
                 node_layers = current_node_module.create_module_layers()
                 node_out = node_input
                 for layer in node_layers:
-                    print('layer in encoding_model : ',layer)
+                    #print('layer in encoding_model : ',layer)
                     node_out = layer(node_out)
 
                 # Register the final output of the sequential module layers as the output of the current node

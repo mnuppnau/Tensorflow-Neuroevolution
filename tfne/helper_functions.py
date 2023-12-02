@@ -1,4 +1,3 @@
-
 import ast
 from typing import Union, Any
 from configparser import ConfigParser
@@ -7,6 +6,7 @@ import tensorflow as tf
 from PyQt5 import QtWidgets
 
 from tfne.visualizer import TFNEVWelcomeWindow
+from tensorflow.keras.layers import Layer
 
 import os
 import pandas as pd
@@ -15,6 +15,39 @@ import zipfile
 import urllib.request as request
 import cv2
 import numpy as np
+
+class SimAMModule(Layer):
+    def __init__(self, e_lambda=1e-4, **kwargs):
+        super(SimAMModule, self).__init__(**kwargs)
+        self.e_lambda = e_lambda
+
+    def build(self, input_shape):
+        super(SimAMModule, self).build(input_shape)
+
+    def call(self, x):
+        # Calculating the dimensions
+        b, h, w, c = x.shape
+
+        n = tf.cast(w * h - 1, tf.float32)  # Ensure n is a floating-point number
+
+        # Subtracting the mean and squaring
+        x_minus_mu_square = tf.math.square(x - tf.reduce_mean(x, axis=[1, 2], keepdims=True))
+
+        # Applying the SimAM formula
+        y = x_minus_mu_square / (4 * (tf.reduce_sum(x_minus_mu_square, axis=[1, 2], keepdims=True) / n + self.e_lambda)) + 0.5
+
+        # Applying the sigmoid function
+        y = tf.sigmoid(y)
+
+        # Multiplying with the input
+        return x * y
+
+    def get_config(self):
+        config = super(SimAMModule, self).get_config()
+        config.update({
+            'e_lambda': self.e_lambda
+        })
+        return config
 
 class ChexpertSmallTF:
     def __init__(self, root, transform=None):
@@ -180,7 +213,7 @@ def read_option_from_config(config, section, option) -> Any:
     print("Config value for '{}/{}': {}".format(section, option, value))
     return value
 
-def select_random_value(min_val, max_val, step, stddev, threshold=4):
+def select_random_value(min_val, max_val, step, stddev):
     """
     Selects a random value based on min, max, step, and stddev.
     
@@ -200,10 +233,10 @@ def select_random_value(min_val, max_val, step, stddev, threshold=4):
     final_value = round_with_step(initial_value, min_val, max_val, step)
     
     # Check if final_value is below the threshold
-    if final_value < threshold:
-        final_value = threshold
-
-    return final_value
+    if final_value < 4:
+        return 6
+    else:
+        return final_value
 
 def round_with_step(value, minimum, maximum, step) -> Union[int, float]:
     """

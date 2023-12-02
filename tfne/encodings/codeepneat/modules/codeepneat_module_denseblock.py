@@ -9,7 +9,7 @@ import tensorflow as tf
 
 from absl import logging
 from .codeepneat_module_base import CoDeepNEATModuleBase
-from tfne.helper_functions import round_with_step, select_random_value
+from tfne.helper_functions import round_with_step, select_random_value, SimAMModule
 from keras import backend
 from keras.applications import imagenet_utils
 from keras.engine import training
@@ -32,6 +32,7 @@ class CoDeepNEATModuleDenseBlock(CoDeepNEATModuleBase):
                  module_id, 
                  parent_mutation, 
                  dtype,
+                 merge_method=None,
                  num_layers=4,
                  growth_rate=None,
                  reduction_rate=None,
@@ -55,6 +56,7 @@ class CoDeepNEATModuleDenseBlock(CoDeepNEATModuleBase):
         self.module_id = module_id
         self.parent_mutation = parent_mutation
         self.dtype = dtype
+        self.merge_method = merge_method
         self.num_layers = num_layers
         self.growth_rate = growth_rate
         self.reduction_rate = reduction_rate
@@ -100,15 +102,51 @@ class CoDeepNEATModuleDenseBlock(CoDeepNEATModuleBase):
                                                self.config_params['num_layers']['stddev'])
      
         self.simam_placed_in_db = random.random() < self.config_params['simam_placed_in_db']
-   
+        
+        self.merge_method = random.choice(self.config_params['merge_method'])
+        self.merge_method['config']['dtype'] = self.dtype 
+        
         logging.info('growth rate is %d',self.growth_rate)
         logging.info('reduction rate is %f',self.reduction_rate)
         logging.info('number of layers is %d',self.num_layers)
         logging.info('simam placed inside dense block is %d',self.simam_placed_in_db)
 
     def create_downsampling_layer(self, in_shape, out_shape) -> tf.keras.layers.Layer:
-        """"""
-        raise NotImplementedError("Downsampling has not yet been implemented for DenseDropout Modules")
+        """
+        Create a downsampling layer to transform a tensor from in_shape to out_shape.
+        @param in_shape: Tuple of input shape (batch, height, width, channels).
+        @param out_shape: Tuple of desired output shape (batch, height, width, channels).
+        @return: Instantiated TF Conv2D layer or pooling layer that can downsample in_shape to out_shape.
+        """
+        #if not (len(in_shape) == 4 and len(out_shape) == 4):
+        #    raise NotImplementedError("Downsampling Layer for shapes not having 4 dimensions is not implemented.")
+
+        # Handling spatial dimensions (height and width) downsampling
+        if out_shape[1] is not None and out_shape[2] is not None:
+            # Compute the stride needed for downsampling
+            stride_height = int(in_shape[1] / out_shape[1])
+            stride_width = int(in_shape[2] / out_shape[2])
+            filters = in_shape[3]  # Keep the same number of channels
+
+            # Use a Conv2D layer with strides for downsampling
+            return tf.keras.layers.Conv2D(filters=filters,
+                                          kernel_size=(3, 3),
+                                          strides=(stride_height, stride_width),
+                                          padding='same',
+                                          activation=None,
+                                          dtype=self.dtype)
+
+        # Handling channel dimension downsampling
+        if out_shape[3] is not None:
+            filters = out_shape[3]  # Adjust the number of channels
+            return tf.keras.layers.Conv2D(filters=filters,
+                                          kernel_size=(1, 1),
+                                          strides=(1, 1),
+                                          padding='same',
+                                          activation=None,
+                                          dtype=self.dtype)
+
+        raise RuntimeError("Unsupported downsampling operation for the given input and output shapes.")
 
     def create_module_layers(self):
 
@@ -139,34 +177,6 @@ class CoDeepNEATModuleDenseBlock(CoDeepNEATModuleBase):
             
             return x
 
-        def simam_attention(input_tensor, e_lambda=1e-4):
-            """
-            SimAM attention mechanism implemented in TensorFlow.
-            Args:
-            - input_tensor: The input tensor (feature map) with dimensions [batch, height, width, channels].
-            - e_lambda: A small value for numerical stability.
-
-            Returns:
-            - Tensor with SimAM attention applied, same shape as input_tensor.
-            """
-            # Calculate the channel-wise mean
-            mean = tf.reduce_mean(input_tensor, axis=[1, 2], keepdims=True)
-    
-            # Calculate the squared difference from the mean
-            x_minus_mu_square = tf.square(input_tensor - mean)
-    
-            # Calculate n (for normalization)
-            _, h, w, _ = input_tensor.shape
-            n = h * w - 1
-
-            # Calculate the y value for scaling
-            y = x_minus_mu_square / (4 * (tf.reduce_sum(x_minus_mu_square, axis=[1, 2], keepdims=True) / n + e_lambda)) + 0.5
-
-            # Apply sigmoid activation to y
-            y = tf.sigmoid(y)
-    
-            return input_tensor * y
-
         def dense_block_w_simam(input_tensor, num_layers=self.num_layers, growth_rate=self.growth_rate):
             concatenated_outputs = [input_tensor]
 
@@ -181,7 +191,7 @@ class CoDeepNEATModuleDenseBlock(CoDeepNEATModuleBase):
                 x1 = layers.Conv2D(self.growth_rate, 3, padding="same", use_bias=False)(x1)
 
                 if i == num_layers-1:
-                    x1 = simam_attention(x1)
+                    x1 = SimAMModule()(x1)
                 
                 concatenated_outputs.append(x1)
 
@@ -210,7 +220,7 @@ class CoDeepNEATModuleDenseBlock(CoDeepNEATModuleBase):
 
         if not self.simam_placed_in_db:
             # SimAM Module
-            simam_module = lambda input_tensor: simam_attention(input_tensor)
+            simam_module = lambda input_tensor: SimAMModule()(input_tensor)
             module_layers.append(simam_module)
 
         # Transition Layer Module
@@ -225,7 +235,8 @@ class CoDeepNEATModuleDenseBlock(CoDeepNEATModuleBase):
 
     def create_mutation(self, offspring_id, max_degree_of_mutation):
         # Copy the parameters of this parent module for the parameters of the offspring
-        offspring_params = {'num_layers': self.num_layers,
+        offspring_params = {'merge_method': self.merge_method,
+                            'num_layers': self.num_layers,
                             'growth_rate': self.growth_rate,
                             'reduction_rate': self.reduction_rate,
                             'simam_placed_in_db': self.simam_placed_in_db}
@@ -243,19 +254,25 @@ class CoDeepNEATModuleDenseBlock(CoDeepNEATModuleBase):
     
         for param_to_mutate in parameters_to_mutate:
             if param_to_mutate == 'num_layers':
-                perturbed_layers = int(np.random.normal(loc=self.num_layers, scale=self.config_params['num_layers']['stddev']))
-                offspring_params['num_layers'] = round_with_step(perturbed_num_layers,
+                perturbed_num_layers = int(np.random.normal(loc=self.num_layers, scale=self.config_params['num_layers']['stddev']))
+                rounded_num_layers = round_with_step(perturbed_num_layers,
                                                               self.config_params['num_layers']['min'],
                                                               self.config_params['num_layers']['max'],
                                                               self.config_params['num_layers']['step']) 
+               
+                if rounded_num_layers < 4:
+                    offspring_params['num_layers'] = 4
+                else:
+                    offspring_params['num_layers'] = rounded_num_layers
+                
                 parent_mutation['mutated_params']['num_layers'] = self.num_layers
                 
             elif param_to_mutate == 'growth_rate':
-                perturbed_layers = int(np.random.normal(loc=self.num_layers, scale=self.config_params['num_layers']['stddev']))
-                offspring_params['num_layers'] = round_with_step(perturbed_num_layers,
-                                                              self.config_params['num_layers']['min'],
-                                                              self.config_params['num_layers']['max'],
-                                                              self.config_params['num_layers']['step']) 
+                perturbed_growth_rate = int(np.random.normal(loc=self.growth_rate, scale=self.config_params['growth_rate']['stddev']))
+                offspring_params['growth_rate'] = round_with_step(perturbed_growth_rate,
+                                                              self.config_params['growth_rate']['min'],
+                                                              self.config_params['growth_rate']['max'],
+                                                              self.config_params['growth_rate']['step']) 
                
                 parent_mutation['mutated_params']['growth_rate'] = self.growth_rate
     
@@ -300,11 +317,16 @@ class CoDeepNEATModuleDenseBlock(CoDeepNEATModuleBase):
         parent_mutation = {'parent_id': (self.module_id, less_fit_module.get_id()),
                            'mutation': 'crossover'}
     
-        offspring_params['num_layers'] = round_with_step(int((self.num_layers + less_fit_module.num_layers) / 2),
+        rounded_num_layers = round_with_step(int((self.num_layers + less_fit_module.num_layers) / 2),
                                                          self.config_params['num_layers']['min'],
                                                          self.config_params['num_layers']['max'],
                                                          self.config_params['num_layers']['step'])
     
+        if rounded_num_layers < 4:
+            offspring_params['num_layers'] = 4
+        else:
+            offspring_params['num_layers'] = rounded_num_layers
+                
         offspring_params['growth_rate'] = round_with_step(int((self.growth_rate + less_fit_module.growth_rate) / 2),
                                                           self.config_params['growth_rate']['min'],
                                                           self.config_params['growth_rate']['max'],
@@ -316,7 +338,9 @@ class CoDeepNEATModuleDenseBlock(CoDeepNEATModuleBase):
                                                           self.config_params['reduction_rate']['step'])
    
         offspring_params['simam_placed_in_db'] = self.simam_placed_in_db
-    
+   
+        offspring_params['merge_method'] = self.merge_method
+
         return CoDeepNEATModuleDenseBlock(config_params=self.config_params,
                                           module_id=offspring_id,
                                           parent_mutation=parent_mutation,
@@ -331,6 +355,7 @@ class CoDeepNEATModuleDenseBlock(CoDeepNEATModuleBase):
             'module_type': self.get_module_type(),
             'module_id': self.module_id,
             'parent_mutation': self.parent_mutation,
+            'merge_method': self.merge_method,
             'num_layers': self.num_layers,
             'growth_rate': self.growth_rate,
             'simam_placed_in_db': self.simam_placed_in_db,
@@ -348,38 +373,24 @@ class CoDeepNEATModuleDenseBlock(CoDeepNEATModuleBase):
         @return: float between 0 and 1. High values indicating difference, low values indicating similarity
         """
         congruence_list = list()
-        if self.merge_method == other_module.merge_method:
-            congruence_list.append(1.0)
+      
+        if self.num_layers >= other_module.num_layers:
+            congruence_list.append(other_module.num_layers / self.num_layers)
         else:
-            congruence_list.append(1 / len(self.config_params['merge_method']))
-        if self.units >= other_module.units:
-            congruence_list.append(other_module.units / self.units)
-        else:
-            congruence_list.append(self.units / other_module.units)
-        if self.activation == other_module.activation:
-            congruence_list.append(1.0)
-        else:
-            congruence_list.append(1 / len(self.config_params['num_layers']))
-        if self.kernel_init == other_module.kernel_init:
-            congruence_list.append(1.0)
-        else:
-            congruence_list.append(1 / len(self.config_params['growth_rate']))
-        if self.kernel_init == other_module.kernel_init:
-            congruence_list.append(1.0)
-        else:
-            congruence_list.append(1 / len(self.config_params['simam_placed_in_db'])) 
-        if self.bias_init == other_module.bias_init:
-            congruence_list.append(1.0)
-        else:
-            congruence_list.append(1 / len(self.config_params['reduction_rate']))
-        congruence_list.append(abs(self.dropout_flag - other_module.dropout_flag))
-        if self.dropout_rate >= other_module.dropout_rate:
-            congruence_list.append(other_module.dropout_rate / self.dropout_rate)
-        else:
-            congruence_list.append(self.dropout_rate / other_module.dropout_rate)
+            congruence_list.append(self.num_layers / other_module.num_layers)
 
-        congruence_list.append(abs(self.batch_norm - other_module.batch_norm))
-    
+        if self.growth_rate >= other_module.growth_rate:
+            congruence_list.append(other_module.growth_rate / self.growth_rate)
+        else:
+            congruence_list.append(self.growth_rate / other_module.growth_rate)
+
+        if self.reduction_rate >= other_module.reduction_rate:
+            congruence_list.append(other_module.reduction_rate / self.reduction_rate)
+        else:
+            congruence_list.append(self.reduction_rate / other_module.reduction_rate)
+
+        #congruence_list.append(abs(self.simam_placed_in_db - other_module.simam_placed_in_db))
+        congruence_list.append(1 if self.simam_placed_in_db == other_module.simam_placed_in_db else 0)
         # Return the distance as the distance of the average congruence to the perfect congruence of 1.0
         return round(1.0 - statistics.mean(congruence_list), 4)
 
