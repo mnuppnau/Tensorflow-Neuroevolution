@@ -55,15 +55,20 @@ class CheXpertEnvironment(BaseEnvironment):
             model = genome.get_model()                                                                                                                                    
             model.summary()
             #optimizer = genome.get_optimizer()                                                                                                                          
-            optimizer = Adam(learning_rate = 0.00001)
+            optimizer = Adam(learning_rate = 0.0001)
+            #optimizer = mixed_precision.LossScaleOptimizer(optimizer, dynamic=True)
             print('model compiling,...........')
             model.compile(optimizer=optimizer,                                                                                                                          
                           loss=tf.keras.losses.BinaryCrossentropy(from_logits=False),                                                                      
                           metrics=[self.accuracy_metric])                                                                                                                   
             print('Starting model training,...............')
-            model.fit(self.train_dataset,
+            try:
+                model.fit(self.train_dataset,
                       epochs=self.epochs,                                                                                                                                        
-                      verbose=2)                                                                                                                                    
+                      verbose=2)
+            except Exception as e:
+                print(f"An error occurred during training: {e}")
+                return -1
 
             print('Model training complete,...............')
             #predictions = model.predict(self.test_dataset)

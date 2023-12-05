@@ -6,12 +6,16 @@ sys.path.append('/tmp/')
 print("sys path : ",sys.path)
 
 import tensorflow as tf
+from tensorflow.keras import mixed_precision
 
 import tfne
 
 gpus = tf.config.experimental.list_physical_devices('GPU')
 for gpu in gpus:
     tf.config.experimental.set_memory_growth(gpu, True)
+
+#policy = mixed_precision.Policy('mixed_float16')
+#mixed_precision.set_global_policy(policy)
 
 flags.DEFINE_integer('logging_level',
                      default=None, help='Integer parameter specifying the verbosity of the absl logging library')
@@ -37,7 +41,7 @@ def codeepneat_chexpert_example(_):
     logging_level = logging.INFO
     config_file_path = '/tmp/examples/codeepneat/codeepneat_chexpert_example/codeepneat_chexpert_example_config.cfg'
     backup_dir_path = '/tmp/examples/codeepneat/codeepneat_chexpert_example/tfne_state_backups/'
-    max_generations = 72
+    max_generations = 12
     max_fitness = 100
 
     # Read in optionally supplied flags, changing the just set standard configuration
@@ -74,8 +78,8 @@ def codeepneat_chexpert_example(_):
     print(best_genome)
 
     # Increase epoch count in environment for a final training of the best genome. Train the genome and then replay it.
-    print("Training best genome for 200 epochs...\n")
-    environment.epochs = 200
+    print("Training best genome for 50 epochs...\n")
+    environment.epochs = 50
     environment.eval_genome_fitness(best_genome)
     environment.replay_genome(best_genome)
 

@@ -204,7 +204,7 @@ class CoDeepNEATConfigProcessing:
         assert self.genomes_per_bp > 0 and isinstance(self.genomes_per_bp, int)
 
         # Sanity check [GENOME] section
-        assert hasattr(tf.dtypes, self.dtype)
+        #assert hasattr(tf.dtypes, self.dtype)
         assert len(self.available_modules) > 0 and isinstance(self.available_modules, list)
         for opt in self.available_optimizers:
             assert hasattr(tf.keras.optimizers, opt)

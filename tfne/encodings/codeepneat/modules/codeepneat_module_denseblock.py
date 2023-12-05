@@ -120,7 +120,8 @@ class CoDeepNEATModuleDenseBlock(CoDeepNEATModuleBase):
         """
         #if not (len(in_shape) == 4 and len(out_shape) == 4):
         #    raise NotImplementedError("Downsampling Layer for shapes not having 4 dimensions is not implemented.")
-
+        print('in shape : ', in_shape)
+        print('out_shape : ', out_shape)
         # Handling spatial dimensions (height and width) downsampling
         if out_shape[1] is not None and out_shape[2] is not None:
             # Compute the stride needed for downsampling

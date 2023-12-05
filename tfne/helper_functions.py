@@ -28,7 +28,7 @@ class SimAMModule(Layer):
         # Calculating the dimensions
         b, h, w, c = x.shape
 
-        n = tf.cast(w * h - 1, tf.float32)  # Ensure n is a floating-point number
+        n = tf.cast(w * h - 1, tf.float16)  # Ensure n is a floating-point number
 
         # Subtracting the mean and squaring
         x_minus_mu_square = tf.math.square(x - tf.reduce_mean(x, axis=[1, 2], keepdims=True))
@@ -106,7 +106,7 @@ def preprocess_image(image_path, resize=None, center_crop_size=320):
     start_y = y // 2 - (center_crop_size // 2)
     
     cropped_image = image[start_y:start_y+center_crop_size, start_x:start_x+center_crop_size]
-    normalized_image = cropped_image.astype(np.float32) / 255.0
+    normalized_image = cropped_image.astype(np.float16) / 255.0
     mean = 0.5330
     std = 0.0349
     normalized_image = (normalized_image - mean) / std
@@ -122,7 +122,7 @@ def _parse_function(image_path, label, root_dir, resize=None):
     image = tf.image.decode_jpeg(image, channels=3)
     if resize:
         image = tf.image.resize(image, [resize, resize])
-    image = tf.cast(image, tf.float32) / 255.0
+    image = tf.cast(image, tf.float16) / 255.0
     return image, label
 
 def debug_function(img, lbl):
@@ -160,7 +160,7 @@ def load_chexpert_data(root_dir='./data', batch_size=32, resize=None):
         print("image path : ", image_path)
         image = tf.image.decode_jpeg(tf.io.read_file(image_path))
         image = tf.image.grayscale_to_rgb(image,name=None)
-        image = tf.cast(image, tf.float32) / 255.0
+        image = tf.cast(image, tf.float16) / 255.0
         image = tf.image.resize(image,[224,224])
         #image = tf.image.per_image_standardization(image)
         print("tensor shape : ", tf.shape(image))
@@ -234,7 +234,7 @@ def select_random_value(min_val, max_val, step, stddev):
     
     # Check if final_value is below the threshold
     if final_value < 4:
-        return 6
+        return 4
     else:
         return final_value
 
