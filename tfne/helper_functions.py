@@ -23,12 +23,15 @@ class SimAMModule(Layer):
 
     def build(self, input_shape):
         super(SimAMModule, self).build(input_shape)
-
+    
     def call(self, x):
         # Calculating the dimensions
         b, h, w, c = x.shape
 
-        n = tf.cast(w * h - 1, tf.float16)  # Ensure n is a floating-point number
+        # Use the same dtype as the input for calculations
+        dtype = x.dtype
+
+        n = tf.cast(w * h - 1, dtype)  # Ensure n is the same type as input
 
         # Subtracting the mean and squaring
         x_minus_mu_square = tf.math.square(x - tf.reduce_mean(x, axis=[1, 2], keepdims=True))
