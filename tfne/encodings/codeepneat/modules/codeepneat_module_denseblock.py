@@ -36,6 +36,7 @@ class CoDeepNEATModuleDenseBlock(CoDeepNEATModuleBase):
                  num_layers=4,
                  growth_rate=None,
                  reduction_rate=None,
+                 include_simam=None,
                  simam_placed_in_db=None,
                  self_initialization_flag=False):
         """
@@ -60,6 +61,7 @@ class CoDeepNEATModuleDenseBlock(CoDeepNEATModuleBase):
         self.num_layers = num_layers
         self.growth_rate = growth_rate
         self.reduction_rate = reduction_rate
+        self.include_simam = include_simam
         self.simam_placed_in_db = simam_placed_in_db
 
         # Register the implementation specifics by calling parent class
@@ -101,6 +103,8 @@ class CoDeepNEATModuleDenseBlock(CoDeepNEATModuleBase):
                                                self.config_params['num_layers']['step'],
                                                self.config_params['num_layers']['stddev'])
      
+        self.include_simam = random.random() < self.config_params['include_simam']
+        
         self.simam_placed_in_db = random.random() < self.config_params['simam_placed_in_db']
         
         self.merge_method = random.choice(self.config_params['merge_method'])
@@ -110,6 +114,7 @@ class CoDeepNEATModuleDenseBlock(CoDeepNEATModuleBase):
         logging.info('reduction rate is %f',self.reduction_rate)
         logging.info('number of layers is %d',self.num_layers)
         logging.info('simam placed inside dense block is %d',self.simam_placed_in_db)
+        logging.info('include simam is %d',self.include_simam)
 
     def create_downsampling_layer(self, in_shape, out_shape) -> tf.keras.layers.Layer:
         """
@@ -202,7 +207,7 @@ class CoDeepNEATModuleDenseBlock(CoDeepNEATModuleBase):
         # Initialize empty list of layers
         module_layers = list()
 
-        if self.simam_placed_in_db:
+        if self.include_simam and self.simam_placed_in_db:
             # Dense Block Module
             dense_module = lambda input_tensor: dense_block_w_simam(
                 input_tensor,
@@ -219,7 +224,7 @@ class CoDeepNEATModuleDenseBlock(CoDeepNEATModuleBase):
 
         module_layers.append(dense_module)
 
-        if not self.simam_placed_in_db:
+        if not self.simam_placed_in_db and self.include_simam:
             # SimAM Module
             simam_module = lambda input_tensor: SimAMModule()(input_tensor)
             module_layers.append(simam_module)
@@ -240,6 +245,7 @@ class CoDeepNEATModuleDenseBlock(CoDeepNEATModuleBase):
                             'num_layers': self.num_layers,
                             'growth_rate': self.growth_rate,
                             'reduction_rate': self.reduction_rate,
+                            'include_simam': self.include_simam,
                             'simam_placed_in_db': self.simam_placed_in_db}
     
         # Create the dict that keeps track of the mutations occurring for the offspring
@@ -288,10 +294,18 @@ class CoDeepNEATModuleDenseBlock(CoDeepNEATModuleBase):
 
                 parent_mutation['mutated_params']['reduction_rate'] = self.reduction_rate
     
+            elif param_to_mutate == 'include_simam':
+                offspring_params['include_simam'] = not self.include_simam
+                parent_mutation['mutated_params']['include_simam'] = self.include_simam
+   
             elif param_to_mutate == 'simam_placed_in_db':
                 offspring_params['simam_placed_in_db'] = not self.simam_placed_in_db
                 parent_mutation['mutated_params']['simam_placed_in_db'] = self.simam_placed_in_db
    
+            elif param_to_mutate == 'merge_method':
+                offspring_params['merge_method'] = self.merge_method
+                parent_mutation['mutated_params']['merge_method'] = self.merge_method
+
             return CoDeepNEATModuleDenseBlock(config_params=self.config_params,
                                           module_id=offspring_id,
                                           parent_mutation=parent_mutation,
@@ -338,6 +352,8 @@ class CoDeepNEATModuleDenseBlock(CoDeepNEATModuleBase):
                                                           self.config_params['reduction_rate']['max'],
                                                           self.config_params['reduction_rate']['step'])
    
+        offspring_params['include_simam'] = self.include_simam
+   
         offspring_params['simam_placed_in_db'] = self.simam_placed_in_db
    
         offspring_params['merge_method'] = self.merge_method
@@ -359,6 +375,7 @@ class CoDeepNEATModuleDenseBlock(CoDeepNEATModuleBase):
             'merge_method': self.merge_method,
             'num_layers': self.num_layers,
             'growth_rate': self.growth_rate,
+            'include_simam': self.include_simam,
             'simam_placed_in_db': self.simam_placed_in_db,
             'reduction_rate': self.reduction_rate # if you have this parameter
         }
@@ -391,8 +408,10 @@ class CoDeepNEATModuleDenseBlock(CoDeepNEATModuleBase):
             congruence_list.append(self.reduction_rate / other_module.reduction_rate)
 
         #congruence_list.append(abs(self.simam_placed_in_db - other_module.simam_placed_in_db))
-        congruence_list.append(1 if self.simam_placed_in_db == other_module.simam_placed_in_db else 0)
+        congruence_list.append(1 if self.include_simam == other_module.include_simam else 0)
         # Return the distance as the distance of the average congruence to the perfect congruence of 1.0
+        congruence_list.append(1 if self.simam_placed_in_db == other_module.simam_placed_in_db else 0) 
+
         return round(1.0 - statistics.mean(congruence_list), 4)
 
     def get_module_type(self) -> str:
