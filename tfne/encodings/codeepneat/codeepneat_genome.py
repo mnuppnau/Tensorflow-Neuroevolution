@@ -10,7 +10,7 @@ from .codeepneat_model import CoDeepNEATModel
 from .codeepneat_blueprint import CoDeepNEATBlueprint
 from .modules import CoDeepNEATModuleBase
 from tfne.encodings.base_genome import BaseGenome
-
+from tfne.helper_functions import strategy
 
 class CoDeepNEATGenome(BaseGenome,
                        CoDeepNEATModel):
@@ -53,11 +53,13 @@ class CoDeepNEATGenome(BaseGenome,
 
         # Initialize internal variables
         self.fitness = None
+        
+        with strategy.scope():
 
-        # Create optimizer and model
-        self.model = None
-        self.optimizer = self.blueprint.create_optimizer()
-        self._create_model()
+            # Create optimizer and model
+            self.model = None
+            self.optimizer = self.blueprint.create_optimizer()
+            self._create_model()
 
     def __call__(self, inputs) -> tf.Tensor:
         """"""

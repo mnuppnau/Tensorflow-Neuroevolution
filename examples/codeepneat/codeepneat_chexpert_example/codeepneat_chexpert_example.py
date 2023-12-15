@@ -1,18 +1,19 @@
+import tensorflow as tf
+
+gpus = tf.config.list_physical_devices('GPU')
+for gpu in gpus:
+    tf.config.experimental.set_memory_growth(gpu, True)
+
 from absl import app, flags, logging
 
 import sys
 sys.path.append('/tmp/')
 
-print("sys path : ",sys.path)
-
-import tensorflow as tf
-from tensorflow.keras import mixed_precision
+import os
+#os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+#from keras import mixed_precision
 
 import tfne
-
-gpus = tf.config.experimental.list_physical_devices('GPU')
-for gpu in gpus:
-    tf.config.experimental.set_memory_growth(gpu, True)
 
 #policy = mixed_precision.Policy('mixed_float16')
 #mixed_precision.set_global_policy(policy)
@@ -31,6 +32,8 @@ flags.DEFINE_integer('max_generations',
 flags.DEFINE_float('max_fitness',
                    default=None, help='Float parameter specifying the fitness of the best genome at which point the '
                                       'evolutionary process should preemptively end')
+
+#strategy = tf.distribute.MirroredStrategy()
 
 def codeepneat_chexpert_example(_):
     """
@@ -65,12 +68,14 @@ def codeepneat_chexpert_example(_):
     print("Environment setup complete,......")
     ne_algorithm = tfne.algorithms.CoDeepNEAT(config)
 
+    #strategy = tf.distribute.MirroredStrategy()
+    #with strategy.scope():
     # Initialize evolution engine and supply config as well as initialized NE algorithm and evaluation environment.
     engine = tfne.EvolutionEngine(ne_algorithm=ne_algorithm,
-                                  environment=environment,
-                                  backup_dir_path=backup_dir_path,
-                                  max_generations=max_generations,
-                                  max_fitness=max_fitness)
+                                      environment=environment,
+                                      backup_dir_path=backup_dir_path,
+                                      max_generations=max_generations,
+                                      max_fitness=max_fitness)
 
     # Start training process, returning the best genome when training ends
     best_genome = engine.train()
@@ -86,7 +91,6 @@ def codeepneat_chexpert_example(_):
     # Serialize and save genotype and Tensorflow model to demonstrate serialization
     best_genome.save_genotype(save_dir_path='./best_genome_genotype/')
     best_genome.save_model(file_path='./best_genome_model/')
-
 
 if __name__ == '__main__':
     app.run(codeepneat_chexpert_example)

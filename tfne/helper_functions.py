@@ -7,7 +7,6 @@ from PyQt5 import QtWidgets
 
 from tfne.visualizer import TFNEVWelcomeWindow
 from tensorflow.keras.layers import Layer
-
 import os
 import pandas as pd
 import tensorflow as tf
@@ -15,6 +14,8 @@ import zipfile
 import urllib.request as request
 import cv2
 import numpy as np
+
+strategy = tf.distribute.MirroredStrategy(devices=["/gpu:0", "/gpu:1"],cross_device_ops=tf.distribute.ReductionToOneDevice())
 
 class SimAMModule(Layer):
     def __init__(self, e_lambda=1e-4, **kwargs):
@@ -109,7 +110,7 @@ def preprocess_image(image_path, resize=None, center_crop_size=320):
     start_y = y // 2 - (center_crop_size // 2)
     
     cropped_image = image[start_y:start_y+center_crop_size, start_x:start_x+center_crop_size]
-    normalized_image = cropped_image.astype(np.float16) / 255.0
+    normalized_image = cropped_image.astype(np.float32) / 255.0
     mean = 0.5330
     std = 0.0349
     normalized_image = (normalized_image - mean) / std
@@ -125,7 +126,7 @@ def _parse_function(image_path, label, root_dir, resize=None):
     image = tf.image.decode_jpeg(image, channels=3)
     if resize:
         image = tf.image.resize(image, [resize, resize])
-    image = tf.cast(image, tf.float16) / 255.0
+    image = tf.cast(image, tf.float32) / 255.0
     return image, label
 
 def debug_function(img, lbl):
@@ -133,8 +134,10 @@ def debug_function(img, lbl):
     print("Debug - lbl: ", lbl)
     return img, lbl
 
-def load_chexpert_data(root_dir='./data', batch_size=32, resize=None):
-    print("root dir : ", root_dir)
+def load_chexpert_data(root_dir='./data', resize=None, config=None):
+    BATCH_SIZE = read_option_from_config(config, 'EVALUATION', 'batch_size') 
+    BATCH_SIZE_PER_REPLICA = read_option_from_config(config, 'EVALUATION', 'batch_size_per_replica')
+
     dataset = ChexpertSmallTF(root=root_dir)
     train_df = pd.read_csv(os.path.join(root_dir, dataset.dir_name, 'processed_train.csv'))
     valid_df = pd.read_csv(os.path.join(root_dir, dataset.dir_name, 'processed_valid.csv'))
@@ -158,26 +161,32 @@ def load_chexpert_data(root_dir='./data', batch_size=32, resize=None):
     train_dataset = tf.data.Dataset.from_tensor_slices((train_image_paths, train_labels))
     test_dataset = tf.data.Dataset.from_tensor_slices((test_image_paths, test_labels))
 
+    BUFFER_SIZE = len(train_dataset)
+    GLOBAL_BATCH_SIZE = BATCH_SIZE_PER_REPLICA * strategy.num_replicas_in_sync
+
     # Define a function to load and preprocess images
     def load_and_preprocess(image_path, label):
         print("image path : ", image_path)
         image = tf.image.decode_jpeg(tf.io.read_file(image_path))
         image = tf.image.grayscale_to_rgb(image,name=None)
-        image = tf.cast(image, tf.float16) / 255.0
+        image = tf.cast(image, tf.float32) / 255.0
         image = tf.image.resize(image,[224,224])
         #image = tf.image.per_image_standardization(image)
         print("tensor shape : ", tf.shape(image))
         return image, label
 
     # Apply the function to the dataset
-    train_dataset = train_dataset.map(load_and_preprocess)
+    train_dataset = train_dataset.map(load_and_preprocess,num_parallel_calls=tf.data.AUTOTUNE)
     train_dataset = train_dataset.shuffle(buffer_size=2048) 
-    train_dataset = train_dataset.batch(batch_size)
-    train_dataset = train_dataset.prefetch(tf.data.experimental.AUTOTUNE)
-    test_dataset = test_dataset.map(load_and_preprocess)
+    train_dataset = train_dataset.batch(GLOBAL_BATCH_SIZE)
+    train_dataset = train_dataset.prefetch(tf.data.AUTOTUNE)
+    test_dataset = test_dataset.map(load_and_preprocess,num_parallel_calls=tf.data.AUTOTUNE)
     test_dataset = test_dataset.shuffle(buffer_size=2048)
-    test_dataset = test_dataset.batch(batch_size)
-    test_dataset = test_dataset.prefetch(tf.data.experimental.AUTOTUNE)
+    test_dataset = test_dataset.batch(GLOBAL_BATCH_SIZE)
+    test_dataset = test_dataset.prefetch(tf.data.AUTOTUNE)
+
+    train_dataset = strategy.experimental_distribute_dataset(train_dataset)
+    test_dataset = strategy.experimental_distribute_dataset(test_dataset)
     
     # Pull a single batch from the training dataset
     #for image_batch, label_batch in train_dataset.take(1):
